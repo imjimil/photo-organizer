@@ -162,9 +162,50 @@ class Manifest:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM photos WHERE status IN ('indexed', 'ocr_done', 'clip_done') "
+                "AND duplicate_of IS NULL "
                 "ORDER BY rel_path"
             ).fetchall()
         return [self._row_to_record(r) for r in rows]
+
+    def browse(
+        self,
+        offset: int = 0,
+        limit: int = 40,
+        sort: str = "date",
+    ) -> list[PhotoRecord]:
+        """Paginated feed of gallery-ready canonical images."""
+        order = "mtime DESC" if sort == "date" else "RANDOM()"
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM photos
+                WHERE status IN ('indexed', 'ocr_done', 'clip_done')
+                  AND duplicate_of IS NULL
+                ORDER BY {order}
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def browse_count(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM photos
+                WHERE status IN ('indexed', 'ocr_done', 'clip_done')
+                  AND duplicate_of IS NULL
+                """
+            ).fetchone()
+        return row["cnt"] if row else 0
+
+    def get_by_path_id(self, path_id_str: str) -> PhotoRecord | None:
+        """Lookup by manifest id (sha256 of rel_path) — primary key."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM photos WHERE id = ?", (path_id_str,)
+            ).fetchone()
+        return self._row_to_record(row) if row else None
 
     def upsert_scanned(
         self, scanned: ScannedFile

@@ -18,3 +18,7 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
