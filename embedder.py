@@ -20,6 +20,14 @@ class CLIPEmbedder:
         self.processor = CLIPProcessor.from_pretrained(CLIP_MODEL)
         self.model.eval()
 
+    def _embed_images_tensor(self, images: list[Image.Image]) -> torch.Tensor:
+        inputs = self.processor(images=images, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            vision_outputs = self.model.vision_model(pixel_values=inputs["pixel_values"])
+            features = self.model.visual_projection(vision_outputs.pooler_output)
+            features = features / features.norm(dim=-1, keepdim=True)
+        return features
+
     def embed_images_batch(
         self, image_paths: list[Path], batch_size: int | None = None
     ) -> list[list[float]]:
@@ -34,11 +42,7 @@ class CLIPEmbedder:
                 with Image.open(path) as img:
                     images.append(img.convert("RGB"))
 
-            inputs = self.processor(images=images, return_tensors="pt").to(self.device)
-            with torch.no_grad():
-                features = self.model.get_image_features(**inputs)
-                features = features / features.norm(dim=-1, keepdim=True)
-
+            features = self._embed_images_tensor(images)
             for vec in features.cpu().tolist():
                 all_vectors.append(vec)
 
@@ -50,6 +54,10 @@ class CLIPEmbedder:
             text=[text], return_tensors="pt", padding=True, truncation=True
         ).to(self.device)
         with torch.no_grad():
-            features = self.model.get_text_features(**inputs)
+            text_outputs = self.model.text_model(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs.get("attention_mask"),
+            )
+            features = self.model.text_projection(text_outputs.pooler_output)
             features = features / features.norm(dim=-1, keepdim=True)
         return features.flatten().cpu().tolist()

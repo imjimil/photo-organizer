@@ -7,7 +7,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from chroma_store import ChromaStore
-from config import IMAGE_FOLDER, setup_logging
+from config import CLIP_BATCH_SIZE, CHROMA_PATH, IMAGE_FOLDER, MANIFEST_PATH, THUMB_CACHE_PATH, setup_logging
 from embedder import CLIPEmbedder
 from manifest import Manifest, PhotoRecord, path_id
 from ocr_worker import process_ocr_batch
@@ -24,18 +24,32 @@ from thumbnails import generate_thumbnail
 logger = logging.getLogger("photo_organizer.index")
 
 
+def reset_index_data() -> None:
+    """Delete manifest, Chroma index, and thumbnail cache for a clean re-index."""
+    import shutil
+
+    paths = [
+        MANIFEST_PATH,
+        CHROMA_PATH,
+        THUMB_CACHE_PATH,
+    ]
+    for path in paths:
+        if path.is_dir():
+            shutil.rmtree(path)
+            logger.info("Removed directory %s", path)
+        elif path.is_file():
+            path.unlink()
+            logger.info("Removed file %s", path)
+
+
 def sync_manifest(manifest: Manifest, chroma: ChromaStore | None = None) -> dict[str, int]:
     """Scan filesystem and sync with manifest. Returns scan stats."""
     scanned = scan_images(IMAGE_FOLDER)
     scanned_paths = {s.rel_path for s in scanned}
-    stats = {"scanned": len(scanned), "new_or_changed": 0, "unchanged": 0}
+    stats = {"scanned": len(scanned), "new_or_changed": 0, "unchanged": 0, "identical": 0}
     stale_ids: list[str] = []
 
-    existing_paths = {
-        r.rel_path for r in manifest.get_all_indexed()
-    } | {r.rel_path for r in manifest.get_pending_clip()} | {
-        r.rel_path for r in manifest.get_pending_ocr()
-    }
+    existing_paths = manifest.get_all_rel_paths()
     missing = existing_paths - scanned_paths
     if missing:
         removed = manifest.mark_missing(missing)
@@ -43,13 +57,24 @@ def sync_manifest(manifest: Manifest, chroma: ChromaStore | None = None) -> dict
         logger.info("Marked %d files as missing", removed)
 
     for item in scanned:
-        _, needs_reindex, stale_chroma_id = manifest.upsert_scanned(item)
+        _, needs_reindex, stale_chroma_id, is_identical = manifest.upsert_scanned(item)
         if stale_chroma_id:
             stale_ids.append(stale_chroma_id)
-        if needs_reindex:
+        if is_identical:
+            stats["identical"] += 1
+        elif needs_reindex:
             stats["new_or_changed"] += 1
         else:
             stats["unchanged"] += 1
+
+    if stats["identical"]:
+        unique = stats["scanned"] - stats["identical"]
+        logger.info(
+            "Found %d identical copies (same image, different filename). "
+            "Will embed %d unique images — this is normal and saves GPU time.",
+            stats["identical"],
+            unique,
+        )
 
     if stale_ids and chroma:
         chroma.delete_ids(stale_ids)
@@ -87,38 +112,50 @@ def run_clip_phase(
     if not valid_paths:
         return stats
 
-    logger.info("Embedding %d images in batches", len(valid_paths))
-    try:
-        vectors = embedder.embed_images_batch(valid_paths)
-    except Exception as exc:
-        logger.error("Batch embedding failed: %s", exc)
-        for record in valid_records:
-            manifest.mark_failed(record.id, str(exc))
-        stats["failed"] += len(valid_records)
-        return stats
+    batch_size = CLIP_BATCH_SIZE
+    total = len(valid_paths)
+    logger.info("Embedding %d images (batch size %d)", total, batch_size)
 
-    ids: list[str] = []
-    embeddings: list[list[float]] = []
-    documents: list[str] = []
-    metadatas: list[dict] = []
+    progress = tqdm(total=total, desc="CLIP embedding", unit="img")
+    for start in range(0, total, batch_size):
+        batch_records = valid_records[start : start + batch_size]
+        batch_paths = valid_paths[start : start + batch_size]
 
-    for record, vector in zip(valid_records, vectors):
-        chroma_id = record.content_hash
-        ids.append(chroma_id)
-        embeddings.append(vector)
-        documents.append(record.ocr_text or "")
-        metadatas.append(
-            {
-                "id": chroma_id,
-                "rel_path": record.rel_path,
-                "has_text": record.has_text,
-            }
-        )
-        manifest.mark_clip_done(record.id)
-        stats["embedded"] += 1
+        try:
+            vectors = embedder.embed_images_batch(batch_paths, batch_size=len(batch_paths))
+        except Exception as exc:
+            logger.error("Batch embedding failed at %d: %s", start, exc)
+            for record in batch_records:
+                manifest.mark_failed(record.id, str(exc))
+            stats["failed"] += len(batch_records)
+            progress.update(len(batch_records))
+            continue
 
-    chroma.upsert_batch(ids, embeddings, documents, metadatas)
-    logger.info("Upserted %d embeddings to Chroma", len(ids))
+        ids: list[str] = []
+        embeddings: list[list[float]] = []
+        documents: list[str] = []
+        metadatas: list[dict] = []
+
+        for record, vector in zip(batch_records, vectors):
+            chroma_id = record.content_hash
+            ids.append(chroma_id)
+            embeddings.append(vector)
+            documents.append(record.ocr_text or "")
+            metadatas.append(
+                {
+                    "id": chroma_id,
+                    "rel_path": record.rel_path,
+                    "has_text": record.has_text,
+                }
+            )
+            manifest.mark_clip_done(record.id)
+            stats["embedded"] += 1
+
+        chroma.upsert_batch(ids, embeddings, documents, metadatas)
+        progress.update(len(batch_records))
+
+    progress.close()
+    logger.info("Upserted %d embeddings to Chroma", stats["embedded"])
     return stats
 
 
@@ -265,8 +302,17 @@ def main() -> None:
         default="",
         help="Export path for organize/dedup results (JSON or CSV)",
     )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete manifest, Chroma DB, and thumbnail cache before indexing",
+    )
     args = parser.parse_args()
     setup_logging()
+
+    if args.reset:
+        reset_index_data()
+        logger.info("Index data reset — starting fresh")
 
     if args.mode == "clip":
         manifest = Manifest()

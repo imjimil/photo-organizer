@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from config import CLIP_MODEL, MANIFEST_PATH, ensure_dirs
+from config import CLIP_MODEL, IMAGE_FOLDER, MANIFEST_PATH, ensure_dirs
 from scanner import ScannedFile, with_content_hash
 
 logger = logging.getLogger("photo_organizer.manifest")
@@ -122,17 +122,27 @@ class Manifest:
 
     def get_canonical_by_content_hash(self, content_hash: str) -> PhotoRecord | None:
         with self._connect() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 "SELECT * FROM photos WHERE content_hash = ? AND duplicate_of IS NULL "
-                "ORDER BY rel_path LIMIT 1",
+                "ORDER BY rel_path",
                 (content_hash,),
-            ).fetchone()
-            if not row:
-                row = conn.execute(
-                    "SELECT * FROM photos WHERE content_hash = ? ORDER BY rel_path LIMIT 1",
-                    (content_hash,),
-                ).fetchone()
-        return self._row_to_record(row) if row else None
+            ).fetchall()
+        for row in rows:
+            record = self._row_to_record(row)
+            if self._record_is_alive(record):
+                return record
+        return None
+
+    def _record_is_alive(self, record: PhotoRecord) -> bool:
+        """True if the record still exists on disk and is not marked missing."""
+        if record.status == STATUS_MISSING:
+            return False
+        return (IMAGE_FOLDER / record.rel_path).exists()
+
+    def get_all_rel_paths(self) -> set[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT rel_path FROM photos").fetchall()
+        return {row["rel_path"] for row in rows}
 
     def get_by_rel_path(self, rel_path: str) -> PhotoRecord | None:
         with self._connect() as conn:
@@ -156,8 +166,10 @@ class Manifest:
             ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
-    def upsert_scanned(self, scanned: ScannedFile) -> tuple[PhotoRecord, bool, str | None]:
-        """Insert or update scanned file. Returns (record, needs_reindex, stale_chroma_id)."""
+    def upsert_scanned(
+        self, scanned: ScannedFile
+    ) -> tuple[PhotoRecord, bool, str | None, bool]:
+        """Returns (record, needs_reindex, stale_chroma_id, is_identical_duplicate)."""
         existing = self.get_by_rel_path(scanned.rel_path)
         needs_reindex = False
         stale_chroma_id: str | None = None
@@ -184,12 +196,12 @@ class Manifest:
                     exif_date=canonical.exif_date,
                 )
                 self._insert(record)
-                logger.info(
-                    "Duplicate content skipped for %s (same as %s)",
+                logger.debug(
+                    "Identical bytes: %s == %s",
                     scanned.rel_path,
                     canonical.rel_path,
                 )
-                return record, False, None
+                return record, False, None, True
 
             record = PhotoRecord(
                 id=file_id,
@@ -208,7 +220,7 @@ class Manifest:
             )
             needs_reindex = True
             self._insert(record)
-            return record, needs_reindex, stale_chroma_id
+            return record, needs_reindex, stale_chroma_id, False
 
         if existing.file_size != scanned.file_size or existing.mtime != scanned.mtime:
             scanned = with_content_hash(scanned)
@@ -218,10 +230,10 @@ class Manifest:
                 self._update_changed(file_id, scanned)
                 existing = self.get_by_rel_path(scanned.rel_path)
                 assert existing is not None
-                return existing, needs_reindex, stale_chroma_id
+                return existing, needs_reindex, stale_chroma_id, False
             self._update_stats(file_id, scanned.file_size, scanned.mtime)
 
-        return existing, False, stale_chroma_id
+        return existing, False, stale_chroma_id, False
 
     def _insert(self, record: PhotoRecord) -> None:
         with self._connect() as conn:
