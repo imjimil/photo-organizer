@@ -151,7 +151,29 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
           <span className="hidden sm:inline">Back</span>
         </button>
         <p className="viewer-counter">{counter}</p>
-        <div className="hidden w-[4.5rem] md:block" aria-hidden />
+        <div className="viewer-bar-actions hidden md:flex">
+          {hasQuote && (
+            <button type="button" onClick={copyQuote} className="viewer-bar-btn" aria-label="Copy text">
+              <IconCopy className="h-[1.125rem] w-[1.125rem]" />
+              Copy
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setRelatedOpen((v) => !v)}
+            disabled={similar.length === 0}
+            className={`viewer-bar-btn ${relatedOpen ? 'viewer-bar-btn-active' : ''}`}
+            aria-label="Related images"
+            aria-pressed={relatedOpen}
+          >
+            <IconRelated className="h-[1.125rem] w-[1.125rem]" />
+            Related
+          </button>
+          <button type="button" onClick={shareImage} className="viewer-bar-btn" aria-label="Share">
+            <IconShare className="h-[1.125rem] w-[1.125rem]" />
+            Share
+          </button>
+        </div>
       </header>
 
       <div
@@ -188,7 +210,7 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
           </button>
         )}
 
-        <div className="pointer-events-none relative z-10 flex h-full items-center justify-center px-3 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-2 md:px-20 md:pb-24 md:pt-2">
+        <div className="pointer-events-none relative z-10 flex h-full items-center justify-center px-3 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-2 md:px-20 md:pb-8 md:pt-2">
           <div
             ref={containerRef}
             className="pointer-events-auto touch-none"
