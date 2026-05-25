@@ -96,9 +96,20 @@ export function useAlbumReorder<T extends { id: string }>(
     overlay.style.transform = `translate3d(${x}px, ${y}px, 0)`
   }, [])
 
+  const itemsRef = useRef(items)
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
+
   const commitOrder = useCallback(async () => {
     const ids = orderedRef.current.map((item) => item.id)
-    await onCommit(ids)
+    const serverKey = itemsRef.current.map((item) => item.id).join(',')
+    if (ids.join(',') === serverKey) return
+    try {
+      await onCommit(ids)
+    } catch {
+      setOrderedItems(itemsRef.current)
+    }
   }, [onCommit])
 
   const finishDrag = useCallback(() => {

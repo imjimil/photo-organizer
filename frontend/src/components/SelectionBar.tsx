@@ -1,5 +1,5 @@
 import { IconAlbum, IconCheck } from './ViewerIcons'
-import { BackButton } from './BackButton'
+
 interface SelectionBarProps {
   count: number
   total?: number
@@ -7,9 +7,6 @@ interface SelectionBarProps {
   onSelectAll: () => void
   onClear: () => void
   onDone: () => void
-  showBack?: boolean
-  onBack?: () => void
-  backLabel?: string
 }
 
 export function SelectionBar({
@@ -19,9 +16,6 @@ export function SelectionBar({
   onSelectAll,
   onClear,
   onDone,
-  showBack = false,
-  onBack,
-  backLabel,
 }: SelectionBarProps) {
   const allSelected = total > 0 && count >= total
 
@@ -29,13 +23,11 @@ export function SelectionBar({
     <div className="selection-bar-wrap" role="region" aria-label="Photo selection">
       <div className="selection-bar" role="toolbar" aria-label="Selection actions">
         <div className="selection-bar-leading">
-          {showBack && onBack && (
-            <BackButton compact onClick={onBack} label={backLabel} />
-          )}          <button type="button" className="selection-bar-done" onClick={onDone}>
+          <button type="button" className="selection-bar-done" onClick={onDone}>
             <IconCheck className="h-4 w-4" />
             Done
           </button>
-          <p className="selection-bar-count type-eyebrow tabular-nums">
+          <p className="selection-bar-count type-meta">
             {count > 0 ? `${count.toLocaleString()} selected` : 'Select photos'}
           </p>
         </div>

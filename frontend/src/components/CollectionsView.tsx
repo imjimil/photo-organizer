@@ -124,7 +124,9 @@ export function CollectionsView({
         )}
 
         {userAlbums.length > 1 && (
-          <p className="type-caption collections-reorder-hint">Drag albums to reorder</p>
+          <p id="collections-reorder-hint" className="type-caption collections-reorder-hint">
+            Drag albums to reorder
+          </p>
         )}
       </section>
 
@@ -188,7 +190,7 @@ function AlbumDragPreview({ album }: { album: AlbumSummary }) {
           )}
         </div>
         <span className="collection-card-label">{album.name}</span>
-        <span className="collection-card-count tabular-nums">{album.count.toLocaleString()}</span>
+        <span className="collection-card-count type-meta">{album.count.toLocaleString()}</span>
       </div>
     </div>
   )
@@ -226,17 +228,19 @@ function DraggableAlbumCard({
           )}
         </div>
         <span className="collection-card-label">{album.name}</span>
-        <span className="collection-card-count tabular-nums">{album.count.toLocaleString()}</span>
+        <span className="collection-card-count type-meta">{album.count.toLocaleString()}</span>
       </button>
 
-      <div
+      <button
+        type="button"
         className="collection-card-drag-handle"
         aria-label={`Reorder ${album.name}`}
+        aria-describedby="collections-reorder-hint"
         onPointerDown={onHandlePointerDown}
         onClick={(event) => event.stopPropagation()}
       >
         <IconGrip />
-      </div>
+      </button>
 
       <button
         type="button"
@@ -287,7 +291,7 @@ function CollectionCard({
           )}
         </div>
         <span className="collection-card-label">{title}</span>
-        <span className="collection-card-count tabular-nums">{count.toLocaleString()}</span>
+        <span className="collection-card-count type-meta">{count.toLocaleString()}</span>
       </button>
       {onManage && (
         <button

@@ -19,7 +19,7 @@ const TABS: {
   Icon: typeof IconNavLibrary
 }[] = [
   { id: 'library', label: 'Library', shortLabel: 'Library', Icon: IconNavLibrary },
-  { id: 'collections', label: 'Collections', shortLabel: 'Albums', Icon: IconNavCollections },
+  { id: 'collections', label: 'Collections', shortLabel: 'Collections', Icon: IconNavCollections },
   { id: 'discover', label: 'Discover', shortLabel: 'Discover', Icon: IconNavDiscover },
   { id: 'search', label: 'Search', shortLabel: 'Search', Icon: IconNavSearch },
 ]
@@ -38,7 +38,7 @@ export function NavPill({ view, onViewChange, className = '' }: NavPillProps) {
   return (
     <div
       className={`nav-pill-track nav-pill-track-4 ${isMobile ? 'nav-pill-track-mobile' : ''} ${className}`}
-      role="tablist"
+      role="navigation"
       aria-label="Main navigation"
     >
       <span
@@ -52,8 +52,7 @@ export function NavPill({ view, onViewChange, className = '' }: NavPillProps) {
           <button
             key={tab.id}
             type="button"
-            role="tab"
-            aria-selected={active}
+            aria-current={active ? 'page' : undefined}
             onClick={() => onViewChange(tab.id)}
             className={`nav-pill-btn nav-pill-btn-4 ${isMobile ? 'nav-pill-btn-mobile' : ''} ${active ? 'nav-pill-btn-active' : ''}`}
           >

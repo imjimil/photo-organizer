@@ -12,6 +12,7 @@ import {
   type SearchResult,
 } from './api/client'
 import { AlbumPicker } from './components/AlbumPicker'
+import { NewAlbumSheet } from './components/NewAlbumSheet'
 import { AlbumSheet } from './components/AlbumSheet'
 import { BottomNav } from './components/BottomNav'
 import { CollectionDetailHeader } from './components/CollectionDetailHeader'
@@ -69,17 +70,21 @@ export default function App() {
   const {
     items: libraryItems,
     loading: libraryLoading,
+    error: libraryError,
     hasMore: libraryHasMore,
     loadMore: loadMoreLibrary,
     total: libraryTotal,
+    reload: reloadLibrary,
   } = useBrowseFeed(feedSort, {})
 
   const {
     items: collectionItems,
     loading: collectionLoading,
+    error: collectionError,
     hasMore: collectionHasMore,
     loadMore: loadMoreCollection,
     total: collectionTotal,
+    reload: reloadCollection,
   } = useBrowseFeed(feedSort, collectionBrowseOptions, view === 'collections' && inCollectionDetail)
 
   const activeGridItems = view === 'collections' && inCollectionDetail ? collectionItems : libraryItems
@@ -91,8 +96,12 @@ export default function App() {
   }, [])
 
   const handleReorderAlbums = useCallback(async (albumIds: string[]) => {
-    await reorderAlbums(albumIds)
-    refreshAlbums()
+    try {
+      await reorderAlbums(albumIds)
+      refreshAlbums()
+    } catch {
+      refreshAlbums()
+    }
   }, [refreshAlbums])
 
   const exitSelection = useCallback(() => {
@@ -251,9 +260,14 @@ export default function App() {
   const emptyCollection =
     view === 'collections' &&
     inCollectionDetail &&
-    collectionScope.kind === 'album' &&
     !collectionLoading &&
+    !collectionError &&
     collectionItems.length === 0
+
+  const emptyCollectionMessage =
+    collectionScope.kind === 'folder'
+      ? 'This folder has no indexed photos yet.'
+      : 'This album is empty. Select photos from your library and add them here.'
 
   const searchStatus = searching
     ? 'Searching'
@@ -314,6 +328,12 @@ export default function App() {
           themeMode={themeMode}
           onThemeCycle={cycleTheme}
           drillIn={mobileDrillIn}
+          selectionMode={selectionMode}
+          onEnterSelection={
+            view === 'library' || (view === 'collections' && inCollectionDetail)
+              ? enterSelectionMode
+              : undefined
+          }
         />
 
         {view === 'library' && (
@@ -323,7 +343,7 @@ export default function App() {
                 type="button"
                 className="selection-backdrop"
                 aria-label="Cancel selection"
-                tabIndex={-1}
+                onClick={exitSelection}
               />
             )}
             {showGridSelection && (
@@ -349,6 +369,8 @@ export default function App() {
                 onLoadMore={loadMoreLibrary}
                 hasMore={libraryHasMore}
                 loading={libraryLoading}
+                error={libraryError}
+                onRetry={reloadLibrary}
                 selectionMode={selectionMode}
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
@@ -368,7 +390,7 @@ export default function App() {
                 type="button"
                 className="selection-backdrop"
                 aria-label="Cancel selection"
-                tabIndex={-1}
+                onClick={exitSelection}
               />
             )}
             {inCollectionDetail && !selectionMode && (
@@ -407,7 +429,7 @@ export default function App() {
                 />
               ) : emptyCollection ? (
                 <p className="type-quote mx-auto max-w-md px-4 py-20 text-center text-text-muted">
-                  This album is empty. Select photos from your library and add them here.
+                  {emptyCollectionMessage}
                 </p>
               ) : (
                 <PhotoGrid
@@ -418,6 +440,8 @@ export default function App() {
                   onLoadMore={loadMoreCollection}
                   hasMore={collectionHasMore}
                   loading={collectionLoading}
+                  error={collectionError}
+                  onRetry={reloadCollection}
                   selectionMode={selectionMode}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
@@ -485,46 +509,12 @@ export default function App() {
       </div>
 
       {newAlbumOpen && (
-        <div className="sheet-scrim" onClick={() => setNewAlbumOpen(false)} role="presentation">
-          <div
-            className="album-sheet sheet-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="New album"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <header className="sheet-header">
-              <p className="type-heading text-text-primary">New album</p>
-            </header>
-            <form onSubmit={handleCreateAlbum} className="album-picker-create px-4 pb-4">
-              <input
-                type="text"
-                value={newAlbumName}
-                onChange={(e) => setNewAlbumName(e.target.value)}
-                placeholder="Album name"
-                className="album-picker-input"
-                maxLength={120}
-                autoFocus
-              />
-              <div className="album-picker-create-actions mt-3">
-                <button
-                  type="button"
-                  className="album-picker-text-btn"
-                  onClick={() => setNewAlbumOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="album-picker-text-btn album-picker-text-btn-accent"
-                  disabled={!newAlbumName.trim()}
-                >
-                  Create
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <NewAlbumSheet
+          name={newAlbumName}
+          onNameChange={setNewAlbumName}
+          onSubmit={handleCreateAlbum}
+          onClose={() => setNewAlbumOpen(false)}
+        />
       )}
 
       {managingAlbum && (

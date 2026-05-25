@@ -34,7 +34,7 @@ export function TopNav({
       <div className="top-rail-inner mx-auto max-w-[1680px] px-8 py-4">
         <div className="top-rail-brand flex min-w-0 items-center gap-8">
           <h1 className="type-brand text-text-primary">Opal</h1>
-          <span className="type-eyebrow tabular-nums">
+          <span className="type-meta">
             {total.toLocaleString()} saved
           </span>
         </div>
@@ -88,38 +88,56 @@ export function MobileHeader({
   themeMode,
   onThemeCycle,
   drillIn,
+  selectionMode = false,
+  onEnterSelection,
 }: {
   view: AppView
   total: number
   themeMode: ThemeMode
   onThemeCycle: () => void
   drillIn?: { title: string; onBack: () => void }
+  selectionMode?: boolean
+  onEnterSelection?: () => void
 }) {
+  const title = drillIn
+    ? drillIn.title
+    : view === 'discover'
+      ? 'Discover'
+      : view === 'collections'
+        ? 'Collections'
+        : view === 'search'
+          ? 'Search'
+          : 'Opal'
+
+  const countLabel = drillIn
+    ? `${total.toLocaleString()} photos`
+    : view !== 'search'
+      ? `${total.toLocaleString()} saved`
+      : null
+
   return (
     <header className="top-rail md:hidden">
       <div className="flex items-center justify-between px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex min-w-0 items-center gap-2.5">
           {drillIn && <BackButton compact onClick={drillIn.onBack} />}
           <div className="min-w-0">
-            {drillIn ? (
-              <h1 className="type-heading truncate text-text-primary">{drillIn.title}</h1>
-            ) : view === 'discover' ? (
-              <h1 className="type-brand text-text-primary">Discover</h1>
-            ) : view === 'collections' ? (
-              <h1 className="type-brand text-text-primary">Collections</h1>
-            ) : (
-              <h1 className="type-brand text-text-primary">Opal</h1>
-            )}
-            <p className="type-eyebrow mt-1">{total.toLocaleString()} saved</p>
+            <h1
+              className={`truncate text-text-primary ${drillIn ? 'type-heading' : 'type-brand'}`}
+            >
+              {title}
+            </h1>
+            {countLabel && <p className="type-meta mt-1">{countLabel}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {onEnterSelection && !selectionMode && (
+            <button type="button" className="library-select-btn" onClick={onEnterSelection}>
+              Select
+            </button>
+          )}
           <ThemeToggle mode={themeMode} onCycle={onThemeCycle} compact />
         </div>
       </div>
-      {view === 'search' && (
-        <p className="type-eyebrow px-4 pb-2 text-text-muted md:hidden">Search</p>
-      )}
     </header>
   )
 }

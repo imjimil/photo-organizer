@@ -218,14 +218,6 @@
     line-height: 1.15;
   }
 
-  .type-logo {
-    font-family: var(--font-brand);
-    font-size: clamp(1.375rem, 2.2vw, 1.625rem);
-    font-weight: 400;
-    letter-spacing: 0.04em;
-    line-height: 1;
-  }
-
   .type-eyebrow {
     font-family: var(--font-ui);
     font-size: 0.6875rem;
@@ -243,6 +235,26 @@
     line-height: 1.45;
     letter-spacing: -0.01em;
     color: var(--color-text-muted);
+  }
+
+  .type-meta {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: var(--color-text-muted);
+  }
+
+  .feed-retry-btn {
+    color: var(--color-accent);
+    font-weight: 500;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .feed-retry-btn:hover {
+    opacity: 0.85;
   }
 
   .type-quote {
@@ -310,16 +322,6 @@
     transition: transform var(--dur-normal) var(--ease-expo);
   }
 
-  .nav-pill-indicator-search {
-    transform: translateX(100%);
-  }
-
-  .nav-pill-track-3 .nav-pill-indicator-3 {
-    width: calc((100% - 6px) / 3);
-    left: 3px;
-    transform: translateX(calc(var(--nav-index, 0) * 100%));
-  }
-
   .nav-pill-track-4 {
     display: inline-grid;
     grid-template-columns: repeat(4, 1fr);
@@ -342,7 +344,7 @@
     min-width: 0;
     width: 100%;
     padding: 0.5rem 0.75rem;
-    text-align: center;
+  text-align: center;
     white-space: nowrap;
   }
 
@@ -428,8 +430,8 @@
   }
 
   .nav-pill-btn-mobile {
-    display: flex;
-    flex-direction: column;
+  display: flex;
+  flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 0.1875rem;
@@ -451,7 +453,7 @@
   .nav-pill-label {
     font-family: var(--font-ui);
     font-size: 0.625rem;
-    font-weight: 500;
+  font-weight: 500;
     letter-spacing: 0.01em;
     line-height: 1;
     color: var(--color-text-muted);
@@ -507,7 +509,7 @@
   }
 
   .viewer-bar-btn {
-    display: inline-flex;
+  display: inline-flex;
     align-items: center;
     gap: 0.375rem;
     justify-self: start;
@@ -1489,6 +1491,8 @@
     justify-content: center;
     width: 1.75rem;
     height: 1.75rem;
+    padding: 0;
+    border: none;
     border-radius: 999px;
     color: var(--color-text-muted);
     background: color-mix(in srgb, var(--color-bg-base) 82%, transparent);
@@ -1619,11 +1623,6 @@
 
   .collection-card-count {
     margin-top: 0.1875rem;
-    font-family: var(--font-ui);
-    font-size: 0.8125rem;
-    font-weight: 400;
-    font-variant-numeric: tabular-nums;
-    color: var(--color-text-muted);
   }
 
   .collection-card-cover-new {

@@ -10,8 +10,8 @@ export function CollectionDetailHeader({ name, count, onBack }: CollectionDetail
   return (
     <div className="collection-detail-header">
       <BackButton onClick={onBack} label={name} />
-      <span className="collection-detail-count type-eyebrow tabular-nums">
-        {count.toLocaleString()} saved
+      <span className="collection-detail-count type-meta">
+        {count.toLocaleString()} photos
       </span>
     </div>
   )

@@ -17,6 +17,8 @@ interface PhotoGridProps {
   onSelectId?: (id: string) => void
   onDeselectId?: (id: string) => void
   selectable?: boolean
+  error?: boolean
+  onRetry?: () => void
 }
 
 export function PhotoGrid({
@@ -33,6 +35,8 @@ export function PhotoGrid({
   onSelectId,
   onDeselectId,
   selectable = false,
+  error = false,
+  onRetry,
 }: PhotoGridProps) {
   const sentinel = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -63,6 +67,17 @@ export function PhotoGrid({
 
   return (
     <>
+      {error && (
+        <p className="type-caption mx-auto max-w-sm px-4 py-20 text-center text-text-muted">
+          Couldn&apos;t load photos.{' '}
+          {onRetry && (
+            <button type="button" className="feed-retry-btn" onClick={onRetry}>
+              Try again
+            </button>
+          )}
+        </p>
+      )}
+      {!error && (
       <div
         ref={gridRef}
         className={`photo-grid ${selectionMode ? 'photo-grid-selecting' : ''} ${selectable ? 'photo-grid-selectable' : ''}`}
@@ -95,8 +110,14 @@ export function PhotoGrid({
           />
         ))}
       </div>
+      )}
       <div ref={sentinel} className="h-px" aria-hidden />
-      {loading && items.length > 0 && (
+      {!error && loading && items.length === 0 && (
+        <p className="type-eyebrow pulse-soft py-16 text-center" aria-live="polite">
+          Loading
+        </p>
+      )}
+      {!error && loading && items.length > 0 && (
         <p className="type-eyebrow pulse-soft py-8 text-center" aria-live="polite">
           Loading more
         </p>

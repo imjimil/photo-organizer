@@ -12,13 +12,39 @@ export function useBrowseFeed(
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
   const [total, setTotal] = useState(0)
+
+  const reload = useCallback(async () => {
+    setLoading(true)
+    setError(false)
+    setItems([])
+    setOffset(0)
+    setHasMore(true)
+    try {
+      const browseOptions: BrowseOptions = {}
+      if (folder) browseOptions.folder = folder
+      if (album) browseOptions.album = album
+      const data = await browse(0, 40, sort, browseOptions)
+      setItems(data.items)
+      setOffset(data.items.length)
+      setHasMore(data.has_more)
+      setTotal(data.total)
+    } catch {
+      setError(true)
+      setItems([])
+      setHasMore(false)
+    } finally {
+      setLoading(false)
+    }
+  }, [sort, folder, album])
 
   useEffect(() => {
     if (!enabled) return
     let cancelled = false
     async function load() {
       setLoading(true)
+      setError(false)
       setItems([])
       setOffset(0)
       setHasMore(true)
@@ -32,6 +58,12 @@ export function useBrowseFeed(
         setOffset(data.items.length)
         setHasMore(data.has_more)
         setTotal(data.total)
+      } catch {
+        if (!cancelled) {
+          setError(true)
+          setItems([])
+          setHasMore(false)
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -59,5 +91,5 @@ export function useBrowseFeed(
     }
   }, [offset, loading, hasMore, sort, folder, album])
 
-  return { items, loading, hasMore, loadMore, total }
+  return { items, loading, error, hasMore, loadMore, total, reload }
 }
