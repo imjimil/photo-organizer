@@ -9,11 +9,15 @@ from fastapi.responses import FileResponse
 from api.deps import get_chroma, get_embedder, get_manifest, record_to_summary
 from api.schemas import (
     BrowseResponse,
+    CollectionSummary,
+    CollectionsResponse,
     ImageDetail,
     ImageSummary,
     SearchResponse,
     SearchResult,
     SimilarResponse,
+    SourceSummary,
+    SourcesResponse,
     StatsResponse,
 )
 from config import IMAGE_FOLDER, setup_logging
@@ -43,6 +47,36 @@ def _resolve_record_by_path_id(path_id_str: str):
     return get_manifest().get_by_path_id(path_id_str)
 
 
+@app.get("/api/collections", response_model=CollectionsResponse)
+def collections(limit: int = Query(24, ge=1, le=100)):
+    manifest = get_manifest()
+    rows = manifest.list_collections(limit=limit)
+    items: list[CollectionSummary] = []
+    for folder, count in rows:
+        if not folder:
+            continue
+        items.append(
+            CollectionSummary(id=folder, name=folder, count=count)
+        )
+    return CollectionsResponse(collections=items)
+
+
+@app.get("/api/sources", response_model=SourcesResponse)
+def sources():
+    manifest = get_manifest()
+    count = manifest.browse_count()
+    return SourcesResponse(
+        sources=[
+            SourceSummary(
+                id="default",
+                name="Library",
+                count=count,
+                active=True,
+            )
+        ]
+    )
+
+
 @app.get("/api/stats", response_model=StatsResponse)
 def stats():
     manifest = get_manifest()
@@ -60,10 +94,13 @@ def browse(
     offset: int = Query(0, ge=0),
     limit: int = Query(40, ge=1, le=100),
     sort: str = Query("date", pattern="^(date|random)$"),
+    folder: str | None = None,
 ):
     manifest = get_manifest()
-    total = manifest.browse_count()
-    records = manifest.browse(offset=offset, limit=limit, sort=sort)
+    total = manifest.browse_count(folder=folder or None)
+    records = manifest.browse(
+        offset=offset, limit=limit, sort=sort, folder=folder or None
+    )
     items = [ImageSummary(**record_to_summary(r)) for r in records]
     return BrowseResponse(
         items=items,

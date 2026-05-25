@@ -172,32 +172,66 @@ class Manifest:
         offset: int = 0,
         limit: int = 40,
         sort: str = "date",
+        folder: str | None = None,
     ) -> list[PhotoRecord]:
         """Paginated feed of gallery-ready canonical images."""
         order = "mtime DESC" if sort == "date" else "RANDOM()"
+        where = (
+            "status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL"
+        )
+        params: list = []
+        if folder:
+            where += " AND (rel_path LIKE ? OR rel_path = ?)"
+            params.extend([f"{folder}/%", folder])
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
                 SELECT * FROM photos
-                WHERE status IN ('indexed', 'ocr_done', 'clip_done')
-                  AND duplicate_of IS NULL
+                WHERE {where}
                 ORDER BY {order}
                 LIMIT ? OFFSET ?
                 """,
-                (limit, offset),
+                (*params, limit, offset),
             ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
-    def browse_count(self) -> int:
+    def browse_count(self, folder: str | None = None) -> int:
+        where = (
+            "status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL"
+        )
+        params: list = []
+        if folder:
+            where += " AND (rel_path LIKE ? OR rel_path = ?)"
+            params.extend([f"{folder}/%", folder])
         with self._connect() as conn:
             row = conn.execute(
-                """
-                SELECT COUNT(*) AS cnt FROM photos
-                WHERE status IN ('indexed', 'ocr_done', 'clip_done')
-                  AND duplicate_of IS NULL
-                """
+                f"SELECT COUNT(*) AS cnt FROM photos WHERE {where}",
+                params,
             ).fetchone()
         return row["cnt"] if row else 0
+
+    def list_collections(self, limit: int = 24) -> list[tuple[str, int]]:
+        """Top-level folder names with image counts."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  CASE
+                    WHEN instr(rel_path, '/') > 0
+                      THEN substr(rel_path, 1, instr(rel_path, '/') - 1)
+                    ELSE ''
+                  END AS collection,
+                  COUNT(*) AS cnt
+                FROM photos
+                WHERE status IN ('indexed', 'ocr_done', 'clip_done')
+                  AND duplicate_of IS NULL
+                GROUP BY collection
+                ORDER BY cnt DESC, collection ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [(r["collection"], r["cnt"]) for r in rows]
 
     def get_by_path_id(self, path_id_str: str) -> PhotoRecord | None:
         """Lookup by manifest id (sha256 of rel_path) — primary key."""

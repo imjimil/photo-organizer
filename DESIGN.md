@@ -1,80 +1,68 @@
-# Opal — Design System
+# Opal — Design System (v6 · Iridescent)
 
-## Principles
+## Register
 
-1. **Content is the UI** — images and quote text dominate; chrome stays minimal.
-2. **Tinted neutrals** — no pure `#000` / `#fff` / `#888`.
-3. **One accent** — warm opal amber for focus and active states only.
-4. **Typography carries mood** — serif for quotes, humanist sans for UI.
-5. **Motion with purpose** — fade/scale on lightbox; no bounce easing.
+**Product** — UI disappears; images and flow carry the experience.
+
+## Reference lane (not copies)
+
+- **Cosmos** — luminous light surfaces, soft discovery, search as portal
+- **Pell Mell** — editorial rhythm, scroll-driven calm, type as identity
+- **Arc** — intentional pacing, images keep dignity
+
+## Physical scene
+
+Browsing saved mood images on a bright desk by a window, or at night with screen glow like opal: violet, mint, blush shifting subtly. Never a brown salon. Never SaaS purple sludge.
 
 ## Typography
 
-Distinctive pairing — literary serif built for long reading + refined geometric sans. Not Inter, not Roboto.
+| Role | Font | Notes |
+|------|------|-------|
+| Display / brand wordmark | **Gloock** | Opal logo only — wide, stone-cut serif |
+| Headings / search / quotes | **Young Serif** | Section titles, search field, pull quotes |
+| UI | **Sora** | Navigation, controls |
+| Meta | **JetBrains Mono** | Counts, labels |
 
-| Role | Font | Why |
-|------|------|-----|
-| Quotes / display | **Literata** | Google Books typeface; designed for sustained reading |
-| UI / chrome | **Albert Sans** | Geometric humanist; crisp without feeling like a template |
-| Meta / scores | **IBM Plex Mono** | Similarity %, dates, keyboard hints |
+Scale ratio 1.333. Body 1rem fixed. Display uses fluid clamp on marketing moments only.
 
-Load via Google Fonts with `font-display: swap`.
+## Color · Opal iridescent
 
-```css
---font-quote: "Literata", "Georgia", serif;
---font-ui: "Albert Sans", system-ui, sans-serif;
---font-mono: "IBM Plex Mono", ui-monospace, monospace;
-```
+Dual theme. Accent is **violet opal**; secondary flash **mint** for active indicators only.
 
-Scale (fluid where noted):
+### Light — pearlescent day
+- Canvas: oklch(0.99 0.006 290)
+- Surface: oklch(0.97 0.01 285)
+- Text: oklch(0.24 0.03 285)
+- Accent: oklch(0.55 0.16 305)
+- Mint: oklch(0.62 0.11 175)
 
-- Wordmark **Opal**: Albert Sans 600, 1.125rem, letter-spacing 0.04em
-- Quote lightbox: Literata 1.375rem (mobile) → 1.625rem (desktop), line-height 1.6, font-optical-sizing: auto
-- Quote card preview: Literata 0.875rem, line-height 1.45, 2-line clamp
-- UI body: 0.9375rem (15px)
-- Captions / meta: 0.8125rem, `--text-muted`
+### Dark — opal night (not cave)
+- Canvas: oklch(0.17 0.035 285)
+- Surface: oklch(0.14 0.038 280)
+- Text: oklch(0.93 0.012 290)
+- Accent: oklch(0.72 0.14 305)
+- Mint: oklch(0.78 0.1 175)
 
-## Color (OKLCH)
+Ambient: fixed radial washes at 4–6% opacity (violet + mint). No gradient text.
 
-```css
---bg-base: oklch(0.14 0.012 285);
---bg-elevated: oklch(0.18 0.014 285);
---bg-hover: oklch(0.22 0.016 285);
---text-primary: oklch(0.93 0.012 285);
---text-muted: oklch(0.68 0.02 285);
---text-faint: oklch(0.52 0.02 285);
---accent: oklch(0.78 0.1 55);
---accent-muted: oklch(0.65 0.06 55);
---border: oklch(0.28 0.015 285);
---focus-ring: oklch(0.78 0.1 55 / 0.45);
-```
+## Layout (structural break from v4)
 
-## Spacing
-
-Base unit 4px. Grid gap 12px. Feed padding 16px (mobile) / 24px (desktop). Lightbox padding 32px.
-
-## Layout
-
-- **Feed:** CSS multi-column masonry, 2 cols mobile / 3 tablet / 4–5 desktop
-- **Header:** sticky, blur backdrop, search centered
-- **Lightbox:** full viewport overlay, image left / quote panel right on wide screens
-
-## Components
-
-- **ImageCard:** no heavy border card — image with subtle radius (6px), hover lift 2px, quote preview 2 lines max
-- **SearchBar:** single field, no pill overload; `/` to focus
-- **Similarity badge:** only on search results, small mono pill
+- **No left sidebar.** Top rail + full-width canvas (Cosmos-like).
+- Collections: horizontal discovery strip under rail.
+- Grid: light = 6px gap, 6px radius, soft hover lift; dark = 3px flush squares.
+- Mobile: bottom dock, floating minimal header.
 
 ## Motion
 
-```css
---ease-out: cubic-bezier(0.22, 1, 0.36, 1);
---duration-fast: 150ms;
---duration-normal: 250ms;
-```
+Product register: 200–320ms, ease-out-expo.
 
-Reduced motion: disable transforms, keep opacity fades only.
+- Nav pill slides between Library / Search
+- View crossfade + 8px rise
+- Tiles: opacity + translateY cascade (30ms stagger)
+- Hover: translateY -2px + shadow (light only)
+- Viewer: scrim fade + image float-in
+- Theme: 400ms semantic color transition
 
-## Impeccable alignment
+## Bans
 
-Reference: [Impeccable](https://github.com/pbakaus/impeccable) anti-patterns — avoid AI slop checklist before ship.
+Maison brown palette, Baskervville/Manrope stack, left sidebar chrome, terracotta gold, OCR on grid, bounce easing.

@@ -39,6 +39,27 @@ export interface StatsResponse {
   status_breakdown: Record<string, number>
 }
 
+export interface SourceSummary {
+  id: string
+  name: string
+  count: number
+  active: boolean
+}
+
+export interface SourcesResponse {
+  sources: SourceSummary[]
+}
+
+export interface CollectionSummary {
+  id: string
+  name: string
+  count: number
+}
+
+export interface CollectionsResponse {
+  collections: CollectionSummary[]
+}
+
 export interface SearchFilters {
   hasText: 'all' | 'yes' | 'no'
   folder: string
@@ -55,10 +76,19 @@ async function fetchJson<T>(url: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export function browse(offset: number, limit = 40, sort = 'date') {
-  return fetchJson<BrowseResponse>(
-    `${BASE}/browse?offset=${offset}&limit=${limit}&sort=${sort}`,
-  )
+export function browse(
+  offset: number,
+  limit = 40,
+  sort = 'date',
+  folder?: string,
+) {
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    sort,
+  })
+  if (folder) params.set('folder', folder)
+  return fetchJson<BrowseResponse>(`${BASE}/browse?${params}`)
 }
 
 export function search(
@@ -88,6 +118,14 @@ export function getSimilar(id: string, limit = 12) {
 
 export function getStats() {
   return fetchJson<StatsResponse>(`${BASE}/stats`)
+}
+
+export function getSources() {
+  return fetchJson<SourcesResponse>(`${BASE}/sources`)
+}
+
+export function getCollections() {
+  return fetchJson<CollectionsResponse>(`${BASE}/collections`)
 }
 
 export function thumbUrl(id: string) {

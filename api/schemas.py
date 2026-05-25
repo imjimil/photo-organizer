@@ -53,3 +53,24 @@ class ImageDetail(BaseModel):
 class SimilarResponse(BaseModel):
     source_id: str
     results: list[SearchResult]
+
+
+class SourceSummary(BaseModel):
+    id: str
+    name: str
+    count: int
+    active: bool = True
+
+
+class SourcesResponse(BaseModel):
+    sources: list[SourceSummary]
+
+
+class CollectionSummary(BaseModel):
+    id: str
+    name: str
+    count: int
+
+
+class CollectionsResponse(BaseModel):
+    collections: list[CollectionSummary]
