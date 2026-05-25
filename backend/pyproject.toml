@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opal"
+version = "0.1.0"
+description = "Opal photo library backend"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.28.0,<2.0.0",
+    "torch>=2.0.0,<3.0.0",
+    "chromadb>=0.4.0,<1.0.0",
+    "transformers>=4.35.0,<5.0.0",
+    "Pillow>=10.0.0,<12.0.0",
+    "easyocr>=1.7.0,<2.0.0",
+    "tqdm>=4.66.0,<5.0.0",
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.32.0,<1.0.0",
+    "pydantic>=2.0.0,<3.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["opal*"]

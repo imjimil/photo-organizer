@@ -2,9 +2,9 @@
 
 from functools import lru_cache
 
-from chroma_store import ChromaStore
-from embedder import CLIPEmbedder
-from manifest import Manifest, PhotoRecord, path_id
+from opal.chroma_store import ChromaStore
+from opal.embedder import CLIPEmbedder
+from opal.manifest import Manifest, PhotoRecord, path_id
 
 
 @lru_cache

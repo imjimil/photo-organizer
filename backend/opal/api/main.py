@@ -8,8 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import sqlite3
 
-from api.deps import get_chroma, get_embedder, get_manifest, record_to_summary
-from api.schemas import (
+from opal.api.deps import get_chroma, get_embedder, get_manifest, record_to_summary
+from opal.api.schemas import (
     AlbumCreateRequest,
     AlbumPhotoRequest,
     AlbumReorderRequest,
@@ -30,9 +30,9 @@ from api.schemas import (
     SourcesResponse,
     StatsResponse,
 )
-from config import IMAGE_FOLDER, setup_logging
-from manifest import path_id
-from thumbnails import get_display_image
+from opal.config import IMAGE_FOLDER, setup_logging
+from opal.manifest import path_id
+from opal.thumbnails import get_display_image
 
 setup_logging()
 logger = logging.getLogger("photo_organizer.api")
@@ -436,7 +436,7 @@ def health():
 def main():
     import uvicorn
 
-    uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("opal.api.main:app", host="127.0.0.1", port=8000, reload=False)
 
 
 if __name__ == "__main__":

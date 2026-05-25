@@ -8,8 +8,8 @@ from collections import defaultdict
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from config import IMAGE_FOLDER, setup_logging
-from scanner import compute_content_hash, scan_images
+from opal.config import IMAGE_FOLDER, setup_logging
+from opal.scanner import compute_content_hash, scan_images
 
 logger = logging.getLogger("photo_organizer.find_duplicates")
 

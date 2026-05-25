@@ -6,20 +6,20 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from chroma_store import ChromaStore
-from config import CLIP_BATCH_SIZE, CHROMA_PATH, IMAGE_FOLDER, MANIFEST_PATH, THUMB_CACHE_PATH, setup_logging
-from embedder import CLIPEmbedder
-from manifest import Manifest, PhotoRecord, path_id
-from ocr_worker import process_ocr_batch
-from organizer import (
+from opal.chroma_store import ChromaStore
+from opal.config import CLIP_BATCH_SIZE, CHROMA_PATH, IMAGE_FOLDER, MANIFEST_PATH, THUMB_CACHE_PATH, setup_logging
+from opal.embedder import CLIPEmbedder
+from opal.manifest import Manifest, PhotoRecord, path_id
+from opal.ocr_worker import process_ocr_batch
+from opal.organizer import (
     execute_organization,
     export_duplicates,
     export_log,
     find_duplicates,
     plan_exif_organization,
 )
-from scanner import scan_images
-from thumbnails import generate_thumbnail
+from opal.scanner import scan_images
+from opal.thumbnails import generate_thumbnail
 
 logger = logging.getLogger("photo_organizer.index")
 

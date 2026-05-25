@@ -5,7 +5,9 @@
   "description": "Opal inspiration gallery — desktop shell",
   "scripts": {
     "dev": "npm run dev --prefix frontend",
-    "dev:api": "python -m api.main",
+    "dev:api": "node scripts/run-backend.mjs api",
+    "index": "node scripts/run-backend.mjs index",
+    "duplicates": "node scripts/run-backend.mjs duplicates",
     "dev:desktop": "tauri dev",
     "build:frontend": "npm run build --prefix frontend",
     "build:desktop": "tauri build",

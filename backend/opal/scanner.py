@@ -4,7 +4,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import IMAGE_EXTENSIONS, IMAGE_FOLDER
+from opal.config import IMAGE_EXTENSIONS, IMAGE_FOLDER
 
 
 @dataclass(frozen=True)

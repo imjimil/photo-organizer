@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from config import CLIP_MODEL, IMAGE_FOLDER, MANIFEST_PATH, ensure_dirs
-from scanner import ScannedFile, with_content_hash
+from opal.config import CLIP_MODEL, IMAGE_FOLDER, MANIFEST_PATH, ensure_dirs
+from opal.scanner import ScannedFile, with_content_hash
 
 logger = logging.getLogger("photo_organizer.manifest")
 

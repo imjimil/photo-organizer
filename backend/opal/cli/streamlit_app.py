@@ -4,11 +4,11 @@ from datetime import date, datetime
 
 import streamlit as st
 
-from chroma_store import ChromaStore
-from config import IMAGE_FOLDER, setup_logging
-from embedder import CLIPEmbedder
-from manifest import Manifest, path_id
-from thumbnails import get_display_image
+from opal.chroma_store import ChromaStore
+from opal.config import IMAGE_FOLDER, setup_logging
+from opal.embedder import CLIPEmbedder
+from opal.manifest import Manifest, path_id
+from opal.thumbnails import get_display_image
 
 setup_logging()
 

@@ -8,10 +8,10 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 
-from chroma_store import ChromaStore
-from config import DUPLICATE_THRESHOLD, IMAGE_FOLDER
-from manifest import Manifest, PhotoRecord
-from ocr_worker import extract_exif_date
+from opal.chroma_store import ChromaStore
+from opal.config import DUPLICATE_THRESHOLD, IMAGE_FOLDER
+from opal.manifest import Manifest, PhotoRecord
+from opal.ocr_worker import extract_exif_date
 
 logger = logging.getLogger("photo_organizer.organizer")
 

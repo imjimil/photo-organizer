@@ -7,7 +7,7 @@ import torch
 from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
-from config import CLIP_BATCH_SIZE, CLIP_MODEL, DEVICE
+from opal.config import CLIP_BATCH_SIZE, CLIP_MODEL, DEVICE
 
 logger = logging.getLogger("photo_organizer.embedder")
 

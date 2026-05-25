@@ -3,8 +3,8 @@
 import logging
 from pathlib import Path
 
-from config import IMAGE_FOLDER, OCR_LANGUAGES
-from manifest import Manifest, PhotoRecord
+from opal.config import IMAGE_FOLDER, OCR_LANGUAGES
+from opal.manifest import Manifest, PhotoRecord
 
 logger = logging.getLogger("photo_organizer.ocr_worker")
 

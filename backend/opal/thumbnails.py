@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from config import IMAGE_FOLDER, THUMB_CACHE_PATH, THUMB_SIZE, ensure_dirs
+from opal.config import IMAGE_FOLDER, THUMB_CACHE_PATH, THUMB_SIZE, ensure_dirs
 
 logger = logging.getLogger("photo_organizer.thumbnails")
 

@@ -5,7 +5,7 @@ from typing import Any
 
 import chromadb
 
-from config import CHROMA_BATCH_SIZE, CHROMA_PATH, COLLECTION_NAME, ensure_dirs
+from opal.config import CHROMA_BATCH_SIZE, CHROMA_PATH, COLLECTION_NAME, ensure_dirs
 
 logger = logging.getLogger("photo_organizer.chroma_store")
 

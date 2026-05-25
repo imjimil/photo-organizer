@@ -86,7 +86,7 @@ fn windows_python_installs() -> Vec<PathBuf> {
 
 fn spawn_with_exe(root: &Path, exe: &Path) -> Result<Child, String> {
     let mut cmd = Command::new(exe);
-    cmd.args(["-m", "api.main"]);
+    cmd.args(["backend/run.py", "api"]);
     configure_api_command(&mut cmd, root);
     cmd.spawn()
         .map_err(|e| format!("{}: {e}", exe.display()))
@@ -94,7 +94,7 @@ fn spawn_with_exe(root: &Path, exe: &Path) -> Result<Child, String> {
 
 fn spawn_with_py_launcher(root: &Path) -> Result<Child, String> {
     let mut cmd = Command::new("py");
-    cmd.args(["-3", "-m", "api.main"]);
+    cmd.args(["-3", "backend/run.py", "api"]);
     configure_api_command(&mut cmd, root);
     cmd.spawn().map_err(|e| format!("py -3: {e}"))
 }
@@ -134,7 +134,7 @@ fn spawn_api() -> Result<Child, String> {
     }
 
     Err(format!(
-        "Could not start Python API. Tried:\n{}\n\nInstall Python 3.11+ and dependencies (pip install -r requirements.txt), or set OPAL_PYTHON to your python.exe path.",
+        "Could not start Python API. Tried:\n{}\n\nInstall Python 3.11+ and dependencies (pip install -r backend/requirements.txt), or set OPAL_PYTHON to your python.exe path.",
         errors.join("\n")
     ))
 }

@@ -10,6 +10,8 @@ venv/
 my_quote_library/
 data/
 .cache/
+deleted_duplicates.json
+duplicates_report.json
 
 # IDE
 .vscode/

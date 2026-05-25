@@ -8,7 +8,7 @@ Native Mac and Windows app wrapping the same React UI and local FastAPI backend.
 |-------|------|
 | UI | React + Vite (`frontend/`) |
 | Shell | Tauri v2 (system WebView) |
-| API | Python FastAPI (`python -m api.main` on port 8000) |
+| API | Python FastAPI (`python backend/run.py api` on port 8000) |
 
 The desktop app **starts the API automatically** when you open Opal and stops it when you quit.
 
@@ -16,7 +16,7 @@ The desktop app **starts the API automatically** when you open Opal and stops it
 
 ### All platforms
 
-- **Python 3.11+** with dependencies: `pip install -r requirements.txt`
+- **Python 3.11+** with dependencies: `pip install -r backend/requirements.txt`
 - **Node.js 20+**
 - **Rust** via [rustup](https://rustup.rs/)
 
@@ -57,14 +57,14 @@ npm run dev:desktop
 This will:
 
 1. Start Vite on `http://localhost:5173`
-2. Spawn `python -m api.main` (OPAL_DESKTOP=1)
+2. Spawn `python backend/run.py api` (OPAL_DESKTOP=1)
 3. Open the native Opal window
 
 ### Manual split (debugging)
 
 ```powershell
 # Terminal 1 — API
-python -m api.main
+python backend/run.py api
 
 # Terminal 2 — web UI only
 npm run dev --prefix frontend
@@ -86,7 +86,7 @@ Installers are written to `src-tauri/target/release/bundle/`.
 |----------|---------|
 | `OPAL_PYTHON` | Python executable (default: `python` / `python3`) |
 | `OPAL_DESKTOP` | Set by Tauri shell; relaxes CORS for local WebView |
-| `IMAGE_FOLDER` | Image library path (see `config.py`) |
+| `IMAGE_FOLDER` | Image library path (see `backend/opal/config.py`) |
 | `MANIFEST_PATH` | SQLite manifest path |
 | `CHROMA_PATH` | ChromaDB folder |
 
@@ -111,6 +111,6 @@ On macOS this also produces `icon.icns`.
 | Issue | Fix |
 |-------|-----|
 | `rustc` not found | Install Rust, restart terminal |
-| API timeout on launch | Run `python -m api.main` manually and check errors |
+| API timeout on launch | Run `python backend/run.py api` manually and check errors |
 | Blank window / API errors | In Tauri, API base is `http://127.0.0.1:8000/api` (not Vite proxy) |
 | WebView2 missing (Windows) | Install Edge WebView2 runtime |
