@@ -1,5 +1,6 @@
 import type { ImageSummary, SearchResult } from '../api/client'
 import { thumbUrl } from '../api/client'
+import { imageAriaLabel } from '../utils/imageLabel'
 
 interface ImageCardProps {
   item: ImageSummary | SearchResult
@@ -21,9 +22,11 @@ export function ImageCard({
     <button
       type="button"
       onClick={onClick}
-      className="photo-tile group relative block aspect-square w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-      style={{ animationDelay: `${Math.min(staggerIndex, 20) * 30}ms` }}
-      aria-label="Open image"
+      className="photo-tile group relative block aspect-square w-full"
+      style={{
+        animationDelay: staggerIndex < 12 ? `${staggerIndex * 30}ms` : '0ms',
+      }}
+      aria-label={imageAriaLabel(item)}
     >
       <img
         src={thumbUrl(item.id)}

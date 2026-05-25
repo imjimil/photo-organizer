@@ -50,7 +50,9 @@ export function PhotoGrid({
       </div>
       <div ref={sentinel} className="h-px" aria-hidden />
       {loading && items.length > 0 && (
-        <p className="type-caption loading-pulse py-8 text-center">Loading</p>
+        <p className="type-eyebrow pulse-soft py-8 text-center" aria-live="polite">
+          Loading more
+        </p>
       )}
     </>
   )

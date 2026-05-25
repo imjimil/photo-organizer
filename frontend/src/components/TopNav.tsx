@@ -50,6 +50,7 @@ export function TopNav({
             <button
               type="button"
               onClick={() => onSortChange('date')}
+              aria-pressed={sort === 'date'}
               className={`sort-link ${sort === 'date' ? 'sort-link-active' : ''}`}
               tabIndex={showSort ? 0 : -1}
             >
@@ -59,6 +60,7 @@ export function TopNav({
             <button
               type="button"
               onClick={() => onSortChange('random')}
+              aria-pressed={sort === 'random'}
               className={`sort-link ${sort === 'random' ? 'sort-link-active' : ''}`}
               tabIndex={showSort ? 0 : -1}
             >

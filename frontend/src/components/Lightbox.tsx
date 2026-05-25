@@ -7,7 +7,9 @@ import {
   type ImageDetail,
   type SearchResult,
 } from '../api/client'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 import { usePinchZoom } from '../hooks/usePinchZoom'
+import { imageAltText } from '../utils/imageLabel'
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -30,6 +32,7 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
   const [toast, setToast] = useState<string | null>(null)
   const [relatedOpen, setRelatedOpen] = useState(false)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const dialogRef = useFocusTrap(true, '[data-viewer-close]')
   const { containerRef, reset, handlers } = usePinchZoom({ maxScale: 5 })
 
   const index = imageIds.indexOf(imageId)
@@ -52,10 +55,10 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
     setSimilar([])
     setRelatedOpen(false)
     reset()
-    getImage(imageId).then(setDetail).catch(console.error)
+    getImage(imageId).then(setDetail).catch(() => {})
     getSimilar(imageId, 12)
       .then((r) => setSimilar(r.results))
-      .catch(console.error)
+      .catch(() => {})
   }, [imageId, reset])
 
   const showToast = (message: string) => {
@@ -140,13 +143,20 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
 
   return (
     <div
+      ref={dialogRef}
       className="viewer-scrim fixed inset-0 z-50 flex flex-col"
       role="dialog"
       aria-modal="true"
       aria-label="Image viewer"
     >
       <header className="viewer-bar">
-        <button type="button" onClick={onClose} className="viewer-bar-btn" aria-label="Close">
+        <button
+          type="button"
+          data-viewer-close
+          onClick={onClose}
+          className="viewer-bar-btn"
+          aria-label="Close"
+        >
           <IconClose className="h-[1.125rem] w-[1.125rem]" />
           <span className="hidden sm:inline">Back</span>
         </button>
@@ -181,11 +191,11 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        <button
-          type="button"
+        <div
           className="absolute inset-0 z-0 cursor-default"
           onClick={handleBackdropClose}
-          aria-label="Close viewer"
+          onKeyDown={() => {}}
+          role="presentation"
         />
 
         {hasPrev && (
@@ -220,13 +230,13 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
               <img
                 data-zoom-target
                 src={mediaUrl(detail.id)}
-                alt=""
+                alt={imageAltText(detail)}
                 draggable={false}
                 className="viewer-float max-h-[72dvh] max-w-full object-contain will-change-transform md:max-h-[82dvh]"
                 style={{ transform: 'translate3d(0,0,0) scale(1)' }}
               />
             ) : (
-              <p className="type-eyebrow pulse-soft pointer-events-none text-text-primary">
+              <p className="type-eyebrow pulse-soft pointer-events-none text-text-primary" aria-live="polite">
                 Loading
               </p>
             )}
@@ -301,7 +311,7 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
             </button>
           </div>
           <div className="viewer-related-grid">
-            {similar.map((s) => (
+            {similar.map((s, i) => (
               <button
                 key={s.id}
                 type="button"
@@ -310,6 +320,7 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
                   setRelatedOpen(false)
                 }}
                 className="viewer-related-thumb"
+                aria-label={`Related image ${i + 1}`}
               >
                 <img src={thumbUrl(s.id)} alt="" className="h-full w-full object-cover" />
               </button>
@@ -343,7 +354,7 @@ function ToolbarButton({
       disabled={disabled}
       className={`viewer-tool-btn ${active ? 'viewer-tool-btn-active' : ''} ${className}`}
       aria-label={label}
-      aria-pressed={active}
+      {...(active !== undefined ? { 'aria-pressed': active } : {})}
     >
       {icon}
       <span>{label}</span>

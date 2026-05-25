@@ -89,9 +89,23 @@ export default function App() {
     ? collections.find((c) => c.id === activeCollection)?.name
     : undefined
 
+  const searchStatus = searching
+    ? 'Searching'
+    : view === 'search' && query.trim() && searchResults.length > 0
+      ? `${searchResults.length} results`
+      : view === 'search' && query.trim() && searchResults.length === 0
+        ? 'No results'
+        : ''
+
   return (
     <div className="app-shell min-h-dvh bg-bg-base text-text-primary">
+      <a href="#main-content" className="skip-link">
+        Skip to content
+      </a>
       <div className="ambient-wash" aria-hidden />
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {searchStatus}
+      </p>
 
       <div className="relative z-10 flex min-h-dvh flex-col pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0">
         <TopNav
@@ -119,7 +133,7 @@ export default function App() {
               activeId={activeCollection}
               onSelect={setActiveCollection}
             />
-            <main className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6 md:pb-12">
+            <main id="main-content" className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6 md:pb-12">
               <PhotoGrid
                 items={items}
                 onSelect={(item) => setSelectedId(item.id)}
@@ -143,7 +157,7 @@ export default function App() {
               showFilters={showFilters}
               onToggleFilters={() => setShowFilters((v) => !v)}
             />
-            <main className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6">
+            <main id="main-content" className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6">
               {searching && (
                 <p className="type-eyebrow pulse-soft py-16 text-center">
                   Searching
