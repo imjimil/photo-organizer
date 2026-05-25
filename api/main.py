@@ -1,16 +1,26 @@
 """Opal FastAPI application."""
 
 import logging
+import os
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+import sqlite3
 
 from api.deps import get_chroma, get_embedder, get_manifest, record_to_summary
 from api.schemas import (
+    AlbumCreateRequest,
+    AlbumPhotoRequest,
+    AlbumReorderRequest,
+    AlbumsResponse,
+    AlbumSummary,
+    AlbumUpdateRequest,
     BrowseResponse,
     CollectionSummary,
     CollectionsResponse,
+    DiscoverResponse,
+    FavoriteStatusResponse,
     ImageDetail,
     ImageSummary,
     SearchResponse,
@@ -29,14 +39,22 @@ logger = logging.getLogger("photo_organizer.api")
 
 app = FastAPI(title="Opal Gallery API", version="1.0.0")
 
+_cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+]
+
+if os.getenv("OPAL_DESKTOP") == "1":
+    _cors_origins.append("tauri://localhost")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-    ],
+    allow_origins=_cors_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,6 +63,22 @@ app.add_middleware(
 
 def _resolve_record_by_path_id(path_id_str: str):
     return get_manifest().get_by_path_id(path_id_str)
+
+
+def _album_to_summary(album) -> AlbumSummary:
+    thumb = None
+    if album.cover_photo_id:
+        thumb = f"/api/thumbs/{album.cover_photo_id}"
+    return AlbumSummary(
+        id=album.id,
+        name=album.name,
+        count=album.count,
+        cover_photo_id=album.cover_photo_id,
+        thumb_url=thumb,
+        created_at=album.created_at,
+        updated_at=album.updated_at,
+        is_system=album.is_system,
+    )
 
 
 @app.get("/api/collections", response_model=CollectionsResponse)
@@ -95,12 +129,22 @@ def browse(
     limit: int = Query(40, ge=1, le=100),
     sort: str = Query("date", pattern="^(date|random)$"),
     folder: str | None = None,
+    album: str | None = None,
 ):
     manifest = get_manifest()
-    total = manifest.browse_count(folder=folder or None)
-    records = manifest.browse(
-        offset=offset, limit=limit, sort=sort, folder=folder or None
-    )
+    if album:
+        album_row = manifest.get_album(album)
+        if not album_row:
+            raise HTTPException(status_code=404, detail="Album not found")
+        total = manifest.album_count(album)
+        records = manifest.browse_album(
+            album_id=album, offset=offset, limit=limit, sort=sort
+        )
+    else:
+        total = manifest.browse_count(folder=folder or None)
+        records = manifest.browse(
+            offset=offset, limit=limit, sort=sort, folder=folder or None
+        )
     items = [ImageSummary(**record_to_summary(r)) for r in records]
     return BrowseResponse(
         items=items,
@@ -109,6 +153,127 @@ def browse(
         total=total,
         has_more=offset + len(items) < total,
     )
+
+
+@app.get("/api/albums", response_model=AlbumsResponse)
+def list_albums():
+    manifest = get_manifest()
+    albums = manifest.list_albums()
+    return AlbumsResponse(albums=[_album_to_summary(a) for a in albums])
+
+
+@app.post("/api/albums", response_model=AlbumSummary, status_code=201)
+def create_album(body: AlbumCreateRequest):
+    manifest = get_manifest()
+    try:
+        album = manifest.create_album(body.name)
+    except ValueError as exc:
+        if "reserved" in str(exc).lower():
+            raise HTTPException(status_code=409, detail="Album name reserved")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Album name already exists")
+    return _album_to_summary(album)
+
+
+@app.put("/api/albums/order", status_code=204)
+def reorder_albums(body: AlbumReorderRequest):
+    manifest = get_manifest()
+    try:
+        manifest.reorder_albums(body.album_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/albums/{album_id}", response_model=AlbumSummary)
+def update_album(album_id: str, body: AlbumUpdateRequest):
+    manifest = get_manifest()
+    album = manifest.get_album(album_id)
+    if not album:
+        raise HTTPException(status_code=404, detail="Album not found")
+    if album.is_system and body.name is not None and body.name.strip().casefold() != album.name.casefold():
+        raise HTTPException(status_code=403, detail="System album cannot be renamed")
+    try:
+        if body.name is not None:
+            updated = manifest.rename_album(album_id, body.name)
+            if not updated:
+                raise HTTPException(status_code=404, detail="Album not found")
+        if body.cover_photo_id is not None:
+            updated = manifest.set_album_cover(album_id, body.cover_photo_id)
+            if not updated:
+                raise HTTPException(status_code=404, detail="Album not found")
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Album name already exists")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    album = manifest.get_album(album_id)
+    assert album is not None
+    return _album_to_summary(album)
+
+
+@app.delete("/api/albums/{album_id}", status_code=204)
+def delete_album(album_id: str):
+    manifest = get_manifest()
+    if not manifest.delete_album(album_id):
+        raise HTTPException(status_code=404, detail="Album not found")
+
+
+@app.post("/api/albums/{album_id}/photos", status_code=204)
+def add_album_photo(album_id: str, body: AlbumPhotoRequest):
+    manifest = get_manifest()
+    if not manifest.get_album(album_id):
+        raise HTTPException(status_code=404, detail="Album not found")
+    if not manifest.add_to_album(album_id, body.photo_id):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return None
+
+
+@app.delete("/api/albums/{album_id}/photos/{photo_id}", status_code=204)
+def remove_album_photo(album_id: str, photo_id: str):
+    manifest = get_manifest()
+    if not manifest.remove_from_album(album_id, photo_id):
+        raise HTTPException(status_code=404, detail="Album or photo not found")
+    return None
+
+
+@app.get("/api/albums/for-photo/{photo_id}")
+def albums_for_photo(photo_id: str):
+    manifest = get_manifest()
+    return {"album_ids": manifest.albums_for_photo(photo_id)}
+
+
+@app.get("/api/favorites/{photo_id}", response_model=FavoriteStatusResponse)
+def favorite_status(photo_id: str):
+    manifest = get_manifest()
+    return FavoriteStatusResponse(
+        favorited=manifest.is_favorite(photo_id),
+        album_id=manifest.favorites_album_id(),
+    )
+
+
+@app.post("/api/favorites/toggle", response_model=FavoriteStatusResponse)
+def toggle_favorite(body: AlbumPhotoRequest):
+    manifest = get_manifest()
+    try:
+        favorited = manifest.toggle_favorite(body.photo_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return FavoriteStatusResponse(
+        favorited=favorited,
+        album_id=manifest.favorites_album_id(),
+    )
+
+
+@app.get("/api/discover", response_model=DiscoverResponse)
+def discover(
+    limit: int = Query(1, ge=1, le=20),
+    exclude: str | None = None,
+):
+    manifest = get_manifest()
+    exclude_ids = [x.strip() for x in exclude.split(",") if x.strip()] if exclude else []
+    records = manifest.discover_random(limit=limit, exclude=exclude_ids or None)
+    items = [ImageSummary(**record_to_summary(r)) for r in records]
+    return DiscoverResponse(items=items)
 
 
 @app.get("/api/search", response_model=SearchResponse)
@@ -182,6 +347,7 @@ def image_detail(image_id: str):
         status=record.status,
         thumb_url=f"/api/thumbs/{pid}",
         media_url=f"/api/media/{pid}",
+        absolute_path=str((IMAGE_FOLDER / record.rel_path).resolve()),
     )
 
 
@@ -234,6 +400,21 @@ def serve_thumb(image_id: str):
         raise HTTPException(status_code=404, detail="Thumbnail not found")
     media = "image/webp" if path.suffix.lower() == ".webp" else "image/jpeg"
     return FileResponse(path, media_type=media)
+
+
+@app.get("/api/export/{image_id}")
+def export_image(image_id: str):
+    record = _resolve_record_by_path_id(image_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Image not found")
+    full = IMAGE_FOLDER / record.rel_path
+    if not full.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+    return FileResponse(
+        full,
+        filename=full.name,
+        media_type="application/octet-stream",
+    )
 
 
 @app.get("/api/media/{image_id}")

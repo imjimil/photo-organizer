@@ -13,9 +13,10 @@ export function imageAriaLabel(item: ImageSummary): string {
 
 export function imageAltText(detail: {
   ocr_text?: string
+  ocr_preview?: string
   rel_path?: string
 }): string {
-  const text = detail.ocr_text?.trim()
+  const text = detail.ocr_text?.trim() || detail.ocr_preview?.trim()
   if (text) {
     return text.length > 120 ? `${text.slice(0, 120)}…` : text
   }

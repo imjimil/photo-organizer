@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { ImageSummary, SearchResult } from '../api/client'
+import { useDragSelect } from '../hooks/useDragSelect'
 import { ImageCard } from './ImageCard'
 
 interface PhotoGridProps {
@@ -9,6 +10,13 @@ interface PhotoGridProps {
   onLoadMore?: () => void
   hasMore?: boolean
   loading?: boolean
+  selectionMode?: boolean
+  selectedIds?: Set<string>
+  onToggleSelect?: (id: string) => void
+  onBeginSelection?: (id: string) => void
+  onSelectId?: (id: string) => void
+  onDeselectId?: (id: string) => void
+  selectable?: boolean
 }
 
 export function PhotoGrid({
@@ -18,8 +26,26 @@ export function PhotoGrid({
   onLoadMore,
   hasMore,
   loading,
+  selectionMode = false,
+  selectedIds,
+  onToggleSelect,
+  onBeginSelection,
+  onSelectId,
+  onDeselectId,
+  selectable = false,
 }: PhotoGridProps) {
   const sentinel = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+
+  const drag = useDragSelect({
+    enabled: selectable && Boolean(onBeginSelection && onSelectId && onDeselectId),
+    selectionMode,
+    selectedIds: selectedIds ?? new Set(),
+    orderedIds: items.map((item) => item.id),
+    onBeginSelection: onBeginSelection ?? (() => {}),
+    onSelectId: onSelectId ?? (() => {}),
+    onDeselectId: onDeselectId ?? (() => {}),
+  })
 
   useEffect(() => {
     if (!onLoadMore || !hasMore) return
@@ -37,14 +63,35 @@ export function PhotoGrid({
 
   return (
     <>
-      <div className="photo-grid">
+      <div
+        ref={gridRef}
+        className={`photo-grid ${selectionMode ? 'photo-grid-selecting' : ''} ${selectable ? 'photo-grid-selectable' : ''}`}
+        {...(selectable ? drag.gridHandlers : {})}
+        style={{ touchAction: selectionMode || drag.isDragging ? 'none' : 'pan-y' }}
+        onClick={(e) => {
+          if (selectionMode) e.stopPropagation()
+        }}
+      >
         {items.map((item, index) => (
           <ImageCard
             key={item.id}
+            photoId={item.id}
             item={item}
-            onClick={() => onSelect(item)}
+            onClick={() => {
+              if (drag.shouldSuppressClick()) return
+              onSelect(item)
+            }}
             showSimilarity={showSimilarity}
             staggerIndex={index}
+            selectionMode={selectionMode}
+            selected={selectedIds?.has(item.id) ?? false}
+            onToggleSelect={
+              onToggleSelect ? () => onToggleSelect(item.id) : undefined
+            }
+            onBeginSelection={
+              onBeginSelection ? () => onBeginSelection(item.id) : undefined
+            }
+            selectable={selectable}
           />
         ))}
       </div>

@@ -29,9 +29,12 @@ export function SearchView({
   }, [])
 
   return (
-    <section className="relative z-10 mx-auto w-full max-w-3xl px-4 pb-6 pt-2 md:px-8 md:pt-8">
-      <p className="type-heading mb-4 hidden text-text-muted md:block">
-        Search your library
+    <section className="search-panel relative z-10 mx-auto w-full max-w-3xl px-4 pb-6 pt-2 md:px-8 md:pt-8">
+      <p className="type-heading mb-1 hidden text-text-primary md:block">
+        Search
+      </p>
+      <p className="type-eyebrow mb-4 hidden text-text-muted md:block">
+        Mood, color, or words inside your images
       </p>
       <input
         ref={inputRef}
@@ -39,11 +42,14 @@ export function SearchView({
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && onSearch()}
-        placeholder="A feeling, a color, a half-remembered line…"
-        className="search-input font-heading"
-        aria-label="Search"
+        placeholder="Search"
+        className="search-input"
+        aria-label="Search your library"
       />
-      <div className="mt-6 flex flex-wrap items-center gap-3">
+      <p className="search-hint type-eyebrow mt-2 text-text-muted md:hidden">
+        Mood · color · text in images
+      </p>
+      <div className="mt-5 flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={onSearch}

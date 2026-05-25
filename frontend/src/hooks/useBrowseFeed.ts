@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { browse, type ImageSummary } from '../api/client'
+import { browse, type BrowseOptions, type ImageSummary } from '../api/client'
 
 export function useBrowseFeed(
   sort: 'date' | 'random' = 'date',
-  folder: string | null = null,
+  options: BrowseOptions = {},
+  enabled = true,
 ) {
+  const folder = options.folder ?? null
+  const album = options.album ?? null
   const [items, setItems] = useState<ImageSummary[]>([])
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
@@ -12,6 +15,7 @@ export function useBrowseFeed(
   const [total, setTotal] = useState(0)
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     async function load() {
       setLoading(true)
@@ -19,7 +23,10 @@ export function useBrowseFeed(
       setOffset(0)
       setHasMore(true)
       try {
-        const data = await browse(0, 40, sort, folder ?? undefined)
+        const browseOptions: BrowseOptions = {}
+        if (folder) browseOptions.folder = folder
+        if (album) browseOptions.album = album
+        const data = await browse(0, 40, sort, browseOptions)
         if (cancelled) return
         setItems(data.items)
         setOffset(data.items.length)
@@ -33,13 +40,16 @@ export function useBrowseFeed(
     return () => {
       cancelled = true
     }
-  }, [sort, folder])
+  }, [sort, folder, album, enabled])
 
   const loadMore = useCallback(async () => {
     if (loading || !hasMore) return
     setLoading(true)
     try {
-      const data = await browse(offset, 40, sort, folder ?? undefined)
+      const browseOptions: BrowseOptions = {}
+      if (folder) browseOptions.folder = folder
+      if (album) browseOptions.album = album
+      const data = await browse(offset, 40, sort, browseOptions)
       setItems((prev) => [...prev, ...data.items])
       setOffset((prev) => prev + data.items.length)
       setHasMore(data.has_more)
@@ -47,7 +57,7 @@ export function useBrowseFeed(
     } finally {
       setLoading(false)
     }
-  }, [offset, loading, hasMore, sort, folder])
+  }, [offset, loading, hasMore, sort, folder, album])
 
   return { items, loading, hasMore, loadMore, total }
 }

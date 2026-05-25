@@ -1,9 +1,8 @@
-import type { CollectionSummary } from '../api/client'
 import type { ThemeMode } from '../hooks/useTheme'
 import { ThemeToggle } from './ThemeToggle'
 import { NavPill } from './NavPill'
-
-export type AppView = 'library' | 'search'
+import { BackButton } from './BackButton'
+export type AppView = 'library' | 'collections' | 'discover' | 'search'
 
 interface TopNavProps {
   view: AppView
@@ -14,6 +13,8 @@ interface TopNavProps {
   sort: 'date' | 'random'
   onSortChange: (sort: 'date' | 'random') => void
   showSort: boolean
+  selectionMode?: boolean
+  onEnterSelection?: () => void
 }
 
 export function TopNav({
@@ -25,6 +26,8 @@ export function TopNav({
   sort,
   onSortChange,
   showSort,
+  selectionMode = false,
+  onEnterSelection,
 }: TopNavProps) {
   return (
     <header className="top-rail hidden md:block">
@@ -41,6 +44,11 @@ export function TopNav({
         </div>
 
         <div className="top-rail-actions">
+          {onEnterSelection && !selectionMode && (
+            <button type="button" className="library-select-btn" onClick={onEnterSelection}>
+              Select
+            </button>
+          )}
           <div
             className={`flex items-center gap-2 ${showSort ? '' : 'invisible pointer-events-none'}`}
             role="group"
@@ -79,86 +87,39 @@ export function MobileHeader({
   total,
   themeMode,
   onThemeCycle,
-  collectionName,
+  drillIn,
 }: {
   view: AppView
   total: number
   themeMode: ThemeMode
   onThemeCycle: () => void
-  collectionName?: string
+  drillIn?: { title: string; onBack: () => void }
 }) {
   return (
     <header className="top-rail md:hidden">
       <div className="flex items-center justify-between px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div>
-          {collectionName ? (
-            <h1 className="type-heading text-text-primary">{collectionName}</h1>
-          ) : (
-            <h1 className="type-brand text-text-primary">Opal</h1>
-          )}
-          <p className="type-eyebrow mt-1">{total.toLocaleString()} saved</p>
+        <div className="flex min-w-0 items-center gap-2.5">
+          {drillIn && <BackButton compact onClick={drillIn.onBack} />}
+          <div className="min-w-0">
+            {drillIn ? (
+              <h1 className="type-heading truncate text-text-primary">{drillIn.title}</h1>
+            ) : view === 'discover' ? (
+              <h1 className="type-brand text-text-primary">Discover</h1>
+            ) : view === 'collections' ? (
+              <h1 className="type-brand text-text-primary">Collections</h1>
+            ) : (
+              <h1 className="type-brand text-text-primary">Opal</h1>
+            )}
+            <p className="type-eyebrow mt-1">{total.toLocaleString()} saved</p>
+          </div>
         </div>
-        <ThemeToggle mode={themeMode} onCycle={onThemeCycle} compact />
+        <div className="flex items-center gap-2">
+          <ThemeToggle mode={themeMode} onCycle={onThemeCycle} compact />
+        </div>
       </div>
       {view === 'search' && (
-        <p className="type-heading px-4 pb-3 text-text-muted">Discover by mood</p>
+        <p className="type-eyebrow px-4 pb-2 text-text-muted md:hidden">Search</p>
       )}
     </header>
-  )
-}
-
-export function CollectionsStrip({
-  collections,
-  activeId,
-  onSelect,
-}: {
-  collections: CollectionSummary[]
-  activeId: string | null
-  onSelect: (id: string | null) => void
-}) {
-  if (collections.length === 0) return null
-
-  return (
-    <div
-      className="relative z-10 flex gap-2 overflow-x-auto px-4 py-3 md:px-8"
-      role="tablist"
-      aria-label="Collections"
-    >
-      <CollectionChip
-        active={activeId === null}
-        label="All"
-        onClick={() => onSelect(null)}
-      />
-      {collections.map((c) => (
-        <CollectionChip
-          key={c.id}
-          active={activeId === c.id}
-          label={c.name}
-          onClick={() => onSelect(c.id)}
-        />
-      ))}
-    </div>
-  )
-}
-
-function CollectionChip({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={`chip ${active ? 'chip-active' : ''}`}
-    >
-      {label}
-    </button>
   )
 }

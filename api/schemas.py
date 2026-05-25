@@ -48,6 +48,7 @@ class ImageDetail(BaseModel):
     status: str
     thumb_url: str
     media_url: str
+    absolute_path: str | None = None
 
 
 class SimilarResponse(BaseModel):
@@ -74,3 +75,44 @@ class CollectionSummary(BaseModel):
 
 class CollectionsResponse(BaseModel):
     collections: list[CollectionSummary]
+
+
+class AlbumSummary(BaseModel):
+    id: str
+    name: str
+    count: int
+    cover_photo_id: str | None = None
+    thumb_url: str | None = None
+    created_at: str
+    updated_at: str
+    is_system: bool = False
+
+
+class FavoriteStatusResponse(BaseModel):
+    favorited: bool
+    album_id: str
+
+
+class AlbumsResponse(BaseModel):
+    albums: list[AlbumSummary]
+
+
+class AlbumCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+
+
+class AlbumUpdateRequest(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=120)
+    cover_photo_id: str | None = None
+
+
+class AlbumPhotoRequest(BaseModel):
+    photo_id: str
+
+
+class AlbumReorderRequest(BaseModel):
+    album_ids: list[str] = Field(..., min_length=0)
+
+
+class DiscoverResponse(BaseModel):
+    items: list[ImageSummary]

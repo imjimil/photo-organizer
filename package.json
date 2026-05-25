@@ -1,0 +1,17 @@
+{
+  "name": "opal",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Opal inspiration gallery — desktop shell",
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "dev:api": "python -m api.main",
+    "dev:desktop": "tauri dev",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:desktop": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.6"
+  }
+}

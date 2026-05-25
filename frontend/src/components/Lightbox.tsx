@@ -1,22 +1,30 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  exportUrl,
+  getFavoriteStatus,
   getImage,
   getSimilar,
   mediaUrl,
   thumbUrl,
+  toggleFavorite,
   type ImageDetail,
   type SearchResult,
 } from '../api/client'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { usePinchZoom } from '../hooks/usePinchZoom'
 import { imageAltText } from '../utils/imageLabel'
+import { AlbumPicker } from './AlbumPicker'
 import {
+  IconAlbum,
   IconChevronLeft,
   IconChevronRight,
   IconClose,
   IconCopy,
+  IconDownload,
+  IconFolder,
   IconRelated,
   IconShare,
+  IconStar,
 } from './ViewerIcons'
 
 interface LightboxProps {
@@ -24,13 +32,27 @@ interface LightboxProps {
   imageIds: string[]
   onClose: () => void
   onSelect: (id: string) => void
+  onAlbumsChanged?: () => void
 }
 
-export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps) {
+function isDesktopShell(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+export function Lightbox({
+  imageId,
+  imageIds,
+  onClose,
+  onSelect,
+  onAlbumsChanged,
+}: LightboxProps) {
   const [detail, setDetail] = useState<ImageDetail | null>(null)
   const [similar, setSimilar] = useState<SearchResult[]>([])
   const [toast, setToast] = useState<string | null>(null)
   const [relatedOpen, setRelatedOpen] = useState(false)
+  const [albumPickerOpen, setAlbumPickerOpen] = useState(false)
+  const [favorited, setFavorited] = useState(false)
+  const [favoriteBusy, setFavoriteBusy] = useState(false)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const dialogRef = useFocusTrap(true, '[data-viewer-close]')
   const { containerRef, reset, handlers } = usePinchZoom({ maxScale: 5 })
@@ -39,6 +61,7 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
   const hasPrev = index > 0
   const hasNext = index >= 0 && index < imageIds.length - 1
   const hasQuote = Boolean(detail?.ocr_text?.trim())
+  const isDesktop = isDesktopShell()
 
   const goPrev = useCallback(() => {
     if (!hasPrev) return
@@ -59,6 +82,9 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
     getSimilar(imageId, 12)
       .then((r) => setSimilar(r.results))
       .catch(() => {})
+    getFavoriteStatus(imageId)
+      .then((r) => setFavorited(r.favorited))
+      .catch(() => setFavorited(false))
   }, [imageId, reset])
 
   const showToast = (message: string) => {
@@ -90,16 +116,75 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
     }
   }
 
+  const handleToggleFavorite = async () => {
+    if (favoriteBusy) return
+    setFavoriteBusy(true)
+    try {
+      const result = await toggleFavorite(imageId)
+      setFavorited(result.favorited)
+      onAlbumsChanged?.()
+      showToast(result.favorited ? 'Added to Favorites' : 'Removed from Favorites')
+    } catch {
+      showToast('Could not update Favorites')
+    } finally {
+      setFavoriteBusy(false)
+    }
+  }
+
+  const saveImage = async () => {
+    const url = exportUrl(imageId)
+    const filename = detail?.rel_path.split(/[/\\]/).pop() ?? `opal-${imageId}.jpg`
+
+    if (isDesktop && detail?.absolute_path) {
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog')
+        const { invoke } = await import('@tauri-apps/api/core')
+        const dest = await save({ defaultPath: filename })
+        if (!dest) return
+        await invoke('copy_file', { from: detail.absolute_path, to: dest })
+        showToast('Image saved')
+        return
+      } catch {
+        showToast('Could not save')
+        return
+      }
+    }
+
+    try {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      showToast('Download started')
+    } catch {
+      showToast('Could not save')
+    }
+  }
+
+  const revealInExplorer = async () => {
+    if (!detail?.absolute_path) return
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('reveal_in_file_manager', { path: detail.absolute_path })
+    } catch {
+      showToast('Could not reveal file')
+    }
+  }
+
   const handleKey = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (relatedOpen) setRelatedOpen(false)
+        if (albumPickerOpen) setAlbumPickerOpen(false)
+        else if (relatedOpen) setRelatedOpen(false)
         else onClose()
       }
       if (e.key === 'ArrowLeft') goPrev()
       if (e.key === 'ArrowRight') goNext()
     },
-    [goNext, goPrev, onClose, relatedOpen],
+    [albumPickerOpen, goNext, goPrev, onClose, relatedOpen],
   )
 
   useEffect(() => {
@@ -112,6 +197,10 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
   }, [handleKey])
 
   const handleBackdropClose = () => {
+    if (albumPickerOpen) {
+      setAlbumPickerOpen(false)
+      return
+    }
     if (relatedOpen) {
       setRelatedOpen(false)
       return
@@ -166,6 +255,36 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
             <button type="button" onClick={copyQuote} className="viewer-bar-btn" aria-label="Copy text">
               <IconCopy className="h-[1.125rem] w-[1.125rem]" />
               Copy
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleToggleFavorite}
+            disabled={favoriteBusy}
+            className={`viewer-bar-btn ${favorited ? 'viewer-bar-btn-active' : ''}`}
+            aria-label={favorited ? 'Remove from Favorites' : 'Add to Favorites'}
+            aria-pressed={favorited}
+          >
+            <IconStar className="h-[1.125rem] w-[1.125rem]" filled={favorited} />
+            Favorite
+          </button>
+          <button
+            type="button"
+            onClick={() => setAlbumPickerOpen(true)}
+            className={`viewer-bar-btn ${albumPickerOpen ? 'viewer-bar-btn-active' : ''}`}
+            aria-label="Add to album"
+          >
+            <IconAlbum className="h-[1.125rem] w-[1.125rem]" />
+            Album
+          </button>
+          <button type="button" onClick={saveImage} className="viewer-bar-btn" aria-label="Save image">
+            <IconDownload className="h-[1.125rem] w-[1.125rem]" />
+            Save
+          </button>
+          {isDesktop && (
+            <button type="button" onClick={revealInExplorer} className="viewer-bar-btn" aria-label="Reveal in Explorer">
+              <IconFolder className="h-[1.125rem] w-[1.125rem]" />
+              Reveal
             </button>
           )}
           <button
@@ -261,6 +380,31 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
             />
           )}
           <ToolbarButton
+            label="Favorite"
+            active={favorited}
+            disabled={favoriteBusy}
+            onClick={handleToggleFavorite}
+            icon={<IconStar className="h-[1.125rem] w-[1.125rem]" filled={favorited} />}
+          />
+          <ToolbarButton
+            label="Album"
+            active={albumPickerOpen}
+            onClick={() => setAlbumPickerOpen(true)}
+            icon={<IconAlbum className="h-[1.125rem] w-[1.125rem]" />}
+          />
+          <ToolbarButton
+            label="Save"
+            onClick={saveImage}
+            icon={<IconDownload className="h-[1.125rem] w-[1.125rem]" />}
+          />
+          {isDesktop && (
+            <ToolbarButton
+              label="Reveal"
+              onClick={revealInExplorer}
+              icon={<IconFolder className="h-[1.125rem] w-[1.125rem]" />}
+            />
+          )}
+          <ToolbarButton
             label="Related"
             disabled={similar.length === 0}
             active={relatedOpen}
@@ -289,9 +433,17 @@ export function Lightbox({ imageId, imageIds, onClose, onSelect }: LightboxProps
       </footer>
 
       {toast && (
-        <div className="viewer-toast" role="status">
+        <div className="viewer-toast viewer-toast-pop" role="status">
           {toast}
         </div>
+      )}
+
+      {albumPickerOpen && (
+        <AlbumPicker
+          photoIds={[imageId]}
+          onClose={() => setAlbumPickerOpen(false)}
+          onChanged={onAlbumsChanged}
+        />
       )}
 
       {relatedOpen && similar.length > 0 && (

@@ -30,6 +30,7 @@ export interface ImageDetail extends ImageSummary {
   ocr_text: string
   status: string
   media_url: string
+  absolute_path?: string | null
 }
 
 export interface StatsResponse {
@@ -60,18 +61,53 @@ export interface CollectionsResponse {
   collections: CollectionSummary[]
 }
 
+export interface AlbumSummary {
+  id: string
+  name: string
+  count: number
+  cover_photo_id: string | null
+  thumb_url: string | null
+  created_at: string
+  updated_at: string
+  is_system?: boolean
+}
+
+export const FAVORITES_ALBUM_ID = '00000000-0000-4000-8000-000000000001'
+
+export interface AlbumsResponse {
+  albums: AlbumSummary[]
+}
+
+export interface DiscoverResponse {
+  items: ImageSummary[]
+}
+
 export interface SearchFilters {
   hasText: 'all' | 'yes' | 'no'
   folder: string
   minSimilarity: number
 }
 
-const BASE = '/api'
+export interface BrowseOptions {
+  folder?: string
+  album?: string
+}
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url)
+const API_HOST = import.meta.env.VITE_API_HOST ?? 'http://127.0.0.1:8000'
+
+function isDesktopShell(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+const BASE = isDesktopShell() ? `${API_HOST}/api` : '/api'
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init)
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${url}`)
+  }
+  if (res.status === 204) {
+    return undefined as T
   }
   return res.json() as Promise<T>
 }
@@ -80,15 +116,22 @@ export function browse(
   offset: number,
   limit = 40,
   sort = 'date',
-  folder?: string,
+  options?: BrowseOptions,
 ) {
   const params = new URLSearchParams({
     offset: String(offset),
     limit: String(limit),
     sort,
   })
-  if (folder) params.set('folder', folder)
+  if (options?.folder) params.set('folder', options.folder)
+  if (options?.album) params.set('album', options.album)
   return fetchJson<BrowseResponse>(`${BASE}/browse?${params}`)
+}
+
+export function discover(limit = 1, exclude: string[] = []) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (exclude.length > 0) params.set('exclude', exclude.join(','))
+  return fetchJson<DiscoverResponse>(`${BASE}/discover?${params}`)
 }
 
 export function search(
@@ -128,10 +171,88 @@ export function getCollections() {
   return fetchJson<CollectionsResponse>(`${BASE}/collections`)
 }
 
+export function getAlbums() {
+  return fetchJson<AlbumsResponse>(`${BASE}/albums`)
+}
+
+export function createAlbum(name: string) {
+  return fetchJson<AlbumSummary>(`${BASE}/albums`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function renameAlbum(id: string, name: string) {
+  return fetchJson<AlbumSummary>(`${BASE}/albums/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+}
+
+export function deleteAlbum(id: string) {
+  return fetchJson<void>(`${BASE}/albums/${id}`, { method: 'DELETE' })
+}
+
+export function reorderAlbums(albumIds: string[]) {
+  return fetchJson<void>(`${BASE}/albums/order`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ album_ids: albumIds }),
+  })
+}
+
+export function setAlbumCover(id: string, coverPhotoId: string | null) {
+  return fetchJson<AlbumSummary>(`${BASE}/albums/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cover_photo_id: coverPhotoId }),
+  })
+}
+
+export function addToAlbum(albumId: string, photoId: string) {
+  return fetchJson<void>(`${BASE}/albums/${albumId}/photos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ photo_id: photoId }),
+  })
+}
+
+export function removeFromAlbum(albumId: string, photoId: string) {
+  return fetchJson<void>(`${BASE}/albums/${albumId}/photos/${photoId}`, {
+    method: 'DELETE',
+  })
+}
+
+export function getAlbumsForPhoto(photoId: string) {
+  return fetchJson<{ album_ids: string[] }>(`${BASE}/albums/for-photo/${photoId}`)
+}
+
+export function getFavoriteStatus(photoId: string) {
+  return fetchJson<{ favorited: boolean; album_id: string }>(`${BASE}/favorites/${photoId}`)
+}
+
+export function toggleFavorite(photoId: string) {
+  return fetchJson<{ favorited: boolean; album_id: string }>(`${BASE}/favorites/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ photo_id: photoId }),
+  })
+}
+
+export function isFavoritesAlbum(album: AlbumSummary) {
+  return album.is_system === true || album.id === FAVORITES_ALBUM_ID
+}
+
 export function thumbUrl(id: string) {
   return `${BASE}/thumbs/${id}`
 }
 
 export function mediaUrl(id: string) {
   return `${BASE}/media/${id}`
+}
+
+export function exportUrl(id: string) {
+  return `${BASE}/export/${id}`
 }

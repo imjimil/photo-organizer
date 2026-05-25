@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,10 +22,25 @@ STATUS_INDEXED = "indexed"
 STATUS_FAILED = "failed"
 STATUS_MISSING = "missing"
 
+FAVORITES_ALBUM_ID = "00000000-0000-4000-8000-000000000001"
+FAVORITES_ALBUM_NAME = "Favorites"
+RESERVED_ALBUM_NAMES = frozenset({FAVORITES_ALBUM_NAME.casefold()})
+
 
 def path_id(rel_path: str) -> str:
     """Stable manifest id per file path."""
     return hashlib.sha256(rel_path.encode()).hexdigest()
+
+
+@dataclass
+class AlbumRecord:
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+    cover_photo_id: str | None
+    count: int = 0
+    is_system: bool = False
 
 
 @dataclass
@@ -63,6 +79,21 @@ CREATE TABLE IF NOT EXISTS photos (
 CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status);
 CREATE INDEX IF NOT EXISTS idx_photos_rel_path ON photos(rel_path);
 CREATE INDEX IF NOT EXISTS idx_photos_content_hash ON photos(content_hash);
+CREATE TABLE IF NOT EXISTS albums (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    cover_photo_id TEXT
+);
+CREATE TABLE IF NOT EXISTS album_items (
+    album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    photo_id TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    PRIMARY KEY (album_id, photo_id)
+);
+CREATE INDEX IF NOT EXISTS idx_album_items_album ON album_items(album_id);
 """
 
 
@@ -75,6 +106,53 @@ class Manifest:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate_albums(conn)
+
+    def _migrate_albums(self, conn: sqlite3.Connection) -> None:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(albums)")}
+        if "is_system" not in cols:
+            conn.execute(
+                "ALTER TABLE albums ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0"
+            )
+        if "sort_order" not in cols:
+            conn.execute(
+                "ALTER TABLE albums ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+            )
+            rows = conn.execute(
+                """
+                SELECT id FROM albums
+                WHERE is_system = 0
+                ORDER BY updated_at DESC, name ASC
+                """
+            ).fetchall()
+            for index, row in enumerate(rows):
+                conn.execute(
+                    "UPDATE albums SET sort_order = ? WHERE id = ?",
+                    (index, row["id"]),
+                )
+            conn.execute(
+                "UPDATE albums SET sort_order = -1 WHERE is_system = 1"
+            )
+        now = self._now_iso()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO albums
+              (id, name, created_at, updated_at, cover_photo_id, is_system)
+            VALUES (?, ?, ?, ?, NULL, 1)
+            """,
+            (FAVORITES_ALBUM_ID, FAVORITES_ALBUM_NAME, now, now),
+        )
+
+    def _album_from_row(self, row: sqlite3.Row) -> AlbumRecord:
+        return AlbumRecord(
+            id=row["id"],
+            name=row["name"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            cover_photo_id=row["cover_photo_id"],
+            count=row["cnt"],
+            is_system=bool(row["is_system"]),
+        )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -232,6 +310,293 @@ class Manifest:
                 (limit,),
             ).fetchall()
         return [(r["collection"], r["cnt"]) for r in rows]
+
+    def _now_iso(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def list_albums(self) -> list[AlbumRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  a.id,
+                  a.name,
+                  a.created_at,
+                  a.updated_at,
+                  a.cover_photo_id,
+                  a.is_system,
+                  COUNT(ai.photo_id) AS cnt
+                FROM albums a
+                LEFT JOIN album_items ai ON ai.album_id = a.id
+                GROUP BY a.id
+                ORDER BY a.is_system DESC, a.sort_order ASC, a.name ASC
+                """
+            ).fetchall()
+        return [self._album_from_row(r) for r in rows]
+
+    def get_album(self, album_id: str) -> AlbumRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                  a.id,
+                  a.name,
+                  a.created_at,
+                  a.updated_at,
+                  a.cover_photo_id,
+                  a.is_system,
+                  COUNT(ai.photo_id) AS cnt
+                FROM albums a
+                LEFT JOIN album_items ai ON ai.album_id = a.id
+                WHERE a.id = ?
+                GROUP BY a.id
+                """,
+                (album_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._album_from_row(row)
+
+    def create_album(self, name: str) -> AlbumRecord:
+        trimmed = name.strip()
+        if not trimmed:
+            raise ValueError("Album name required")
+        if trimmed.casefold() in RESERVED_ALBUM_NAMES:
+            raise ValueError("Album name reserved")
+        now = self._now_iso()
+        album_id = str(uuid.uuid4())
+        with self._connect() as conn:
+            max_order = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM albums WHERE is_system = 0"
+            ).fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO albums (id, name, created_at, updated_at, cover_photo_id, sort_order)
+                VALUES (?, ?, ?, ?, NULL, ?)
+                """,
+                (album_id, trimmed, now, now, max_order + 1),
+            )
+        album = self.get_album(album_id)
+        assert album is not None
+        return album
+
+    def reorder_albums(self, album_ids: list[str]) -> None:
+        if not album_ids:
+            return
+        with self._connect() as conn:
+            user_albums = conn.execute(
+                "SELECT id FROM albums WHERE is_system = 0 ORDER BY sort_order ASC, name ASC"
+            ).fetchall()
+            user_ids = {row["id"] for row in user_albums}
+            if set(album_ids) != user_ids:
+                raise ValueError("Album order must include every user album exactly once")
+            for index, album_id in enumerate(album_ids):
+                conn.execute(
+                    "UPDATE albums SET sort_order = ? WHERE id = ? AND is_system = 0",
+                    (index, album_id),
+                )
+
+    def rename_album(self, album_id: str, name: str) -> AlbumRecord | None:
+        trimmed = name.strip()
+        if not trimmed:
+            raise ValueError("Album name required")
+        if trimmed.casefold() in RESERVED_ALBUM_NAMES:
+            raise ValueError("Album name reserved")
+        album = self.get_album(album_id)
+        if not album or album.is_system:
+            return None
+        now = self._now_iso()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE albums SET name = ?, updated_at = ? WHERE id = ?",
+                (trimmed, now, album_id),
+            )
+            if cur.rowcount == 0:
+                return None
+        return self.get_album(album_id)
+
+    def set_album_cover(self, album_id: str, photo_id: str | None) -> AlbumRecord | None:
+        now = self._now_iso()
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE albums SET cover_photo_id = ?, updated_at = ? WHERE id = ?",
+                (photo_id, now, album_id),
+            )
+            if cur.rowcount == 0:
+                return None
+        return self.get_album(album_id)
+
+    def delete_album(self, album_id: str) -> bool:
+        album = self.get_album(album_id)
+        if not album or album.is_system:
+            return False
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+            return cur.rowcount > 0
+
+    def add_to_album(self, album_id: str, photo_id: str) -> bool:
+        if not self.get_by_path_id(photo_id):
+            return False
+        now = self._now_iso()
+        with self._connect() as conn:
+            album = conn.execute(
+                "SELECT id, cover_photo_id FROM albums WHERE id = ?", (album_id,)
+            ).fetchone()
+            if not album:
+                return False
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO album_items (album_id, photo_id, added_at, sort_order)
+                VALUES (?, ?, ?, 0)
+                """,
+                (album_id, photo_id, now),
+            )
+            if not album["cover_photo_id"]:
+                conn.execute(
+                    "UPDATE albums SET cover_photo_id = ?, updated_at = ? WHERE id = ?",
+                    (photo_id, now, album_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE albums SET updated_at = ? WHERE id = ?",
+                    (now, album_id),
+                )
+        return True
+
+    def remove_from_album(self, album_id: str, photo_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM album_items WHERE album_id = ? AND photo_id = ?",
+                (album_id, photo_id),
+            )
+            if cur.rowcount == 0:
+                return False
+            album = conn.execute(
+                "SELECT cover_photo_id FROM albums WHERE id = ?", (album_id,)
+            ).fetchone()
+            if album and album["cover_photo_id"] == photo_id:
+                next_cover = conn.execute(
+                    """
+                    SELECT photo_id FROM album_items
+                    WHERE album_id = ?
+                    ORDER BY added_at DESC
+                    LIMIT 1
+                    """,
+                    (album_id,),
+                ).fetchone()
+                conn.execute(
+                    "UPDATE albums SET cover_photo_id = ?, updated_at = ? WHERE id = ?",
+                    (
+                        next_cover["photo_id"] if next_cover else None,
+                        self._now_iso(),
+                        album_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "UPDATE albums SET updated_at = ? WHERE id = ?",
+                    (self._now_iso(), album_id),
+                )
+        return True
+
+    def albums_for_photo(self, photo_id: str) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT album_id FROM album_items
+                WHERE photo_id = ?
+                ORDER BY added_at DESC
+                """,
+                (photo_id,),
+            ).fetchall()
+        return [r["album_id"] for r in rows]
+
+    def favorites_album_id(self) -> str:
+        return FAVORITES_ALBUM_ID
+
+    def is_favorite(self, photo_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM album_items
+                WHERE album_id = ? AND photo_id = ?
+                LIMIT 1
+                """,
+                (FAVORITES_ALBUM_ID, photo_id),
+            ).fetchone()
+        return row is not None
+
+    def toggle_favorite(self, photo_id: str) -> bool:
+        if self.is_favorite(photo_id):
+            self.remove_from_album(FAVORITES_ALBUM_ID, photo_id)
+            return False
+        if not self.add_to_album(FAVORITES_ALBUM_ID, photo_id):
+            raise ValueError("Photo not found")
+        return True
+
+    def browse_album(
+        self,
+        album_id: str,
+        offset: int = 0,
+        limit: int = 40,
+        sort: str = "date",
+    ) -> list[PhotoRecord]:
+        order = "p.mtime DESC" if sort == "date" else "RANDOM()"
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT p.*
+                FROM photos p
+                INNER JOIN album_items ai ON ai.photo_id = p.id
+                WHERE ai.album_id = ?
+                  AND p.status IN ('indexed', 'ocr_done', 'clip_done')
+                  AND p.duplicate_of IS NULL
+                ORDER BY {order}
+                LIMIT ? OFFSET ?
+                """,
+                (album_id, limit, offset),
+            ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def album_count(self, album_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM photos p
+                INNER JOIN album_items ai ON ai.photo_id = p.id
+                WHERE ai.album_id = ?
+                  AND p.status IN ('indexed', 'ocr_done', 'clip_done')
+                  AND p.duplicate_of IS NULL
+                """,
+                (album_id,),
+            ).fetchone()
+        return row["cnt"] if row else 0
+
+    def discover_random(
+        self,
+        limit: int = 1,
+        exclude: list[str] | None = None,
+    ) -> list[PhotoRecord]:
+        where = (
+            "status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL"
+        )
+        params: list = []
+        if exclude:
+            placeholders = ",".join("?" for _ in exclude)
+            where += f" AND id NOT IN ({placeholders})"
+            params.extend(exclude)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM photos
+                WHERE {where}
+                ORDER BY RANDOM()
+                LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
+        return [self._row_to_record(r) for r in rows]
 
     def get_by_path_id(self, path_id_str: str) -> PhotoRecord | None:
         """Lookup by manifest id (sha256 of rel_path) — primary key."""
