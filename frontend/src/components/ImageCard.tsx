@@ -44,13 +44,15 @@ export function ImageCard({
     onBeginSelection?.()
   }
 
+  const animate = staggerIndex >= 0 && staggerIndex < 20
+
   return (
     <div
       data-photo-id={photoId}
-      className={`photo-tile-wrap group ${selectionMode ? 'photo-tile-wrap-selecting' : ''} ${selected ? 'photo-tile-wrap-selected' : ''}`}
-      style={{
-        animationDelay: staggerIndex < 12 ? `${staggerIndex * 30}ms` : '0ms',
-      }}
+      className={`photo-tile-wrap group ${animate ? '' : 'photo-tile-wrap-static'} ${selectionMode ? 'photo-tile-wrap-selecting' : ''} ${selected ? 'photo-tile-wrap-selected' : ''}`}
+      style={
+        animate ? { animationDelay: `${staggerIndex * 30}ms` } : undefined
+      }
     >
       <button
         type="button"

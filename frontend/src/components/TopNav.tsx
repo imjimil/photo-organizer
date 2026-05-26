@@ -90,6 +90,9 @@ export function MobileHeader({
   drillIn,
   selectionMode = false,
   onEnterSelection,
+  sort,
+  onSortChange,
+  showSort = false,
 }: {
   view: AppView
   total: number
@@ -98,6 +101,9 @@ export function MobileHeader({
   drillIn?: { title: string; onBack: () => void }
   selectionMode?: boolean
   onEnterSelection?: () => void
+  sort?: 'date' | 'random'
+  onSortChange?: (sort: 'date' | 'random') => void
+  showSort?: boolean
 }) {
   const title = drillIn
     ? drillIn.title
@@ -130,6 +136,26 @@ export function MobileHeader({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {showSort && onSortChange && sort && !drillIn && view === 'library' && (
+            <div className="mobile-sort-toggle" role="group" aria-label="Sort library">
+              <button
+                type="button"
+                onClick={() => onSortChange('date')}
+                aria-pressed={sort === 'date'}
+                className={`mobile-sort-btn ${sort === 'date' ? 'mobile-sort-btn-active' : ''}`}
+              >
+                Recent
+              </button>
+              <button
+                type="button"
+                onClick={() => onSortChange('random')}
+                aria-pressed={sort === 'random'}
+                className={`mobile-sort-btn ${sort === 'random' ? 'mobile-sort-btn-active' : ''}`}
+              >
+                Shuffle
+              </button>
+            </div>
+          )}
           {onEnterSelection && !selectionMode && (
             <button type="button" className="library-select-btn" onClick={onEnterSelection}>
               Select

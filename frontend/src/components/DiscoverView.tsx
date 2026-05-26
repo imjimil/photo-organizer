@@ -352,7 +352,7 @@ export function DiscoverView({ onOpen }: DiscoverViewProps) {
             disabled={committing}
             className="discover-card discover-card-front discover-card-live"
             style={frontStyle}
-            aria-label="Next image"
+            aria-label={current ? `Open ${imageAltText(current)}` : 'Open image'}
           >
             <img
               src={mediaUrl(current.id)}

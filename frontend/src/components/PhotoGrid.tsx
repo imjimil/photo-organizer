@@ -97,7 +97,7 @@ export function PhotoGrid({
               onSelect(item)
             }}
             showSimilarity={showSimilarity}
-            staggerIndex={index}
+            staggerIndex={index < 20 ? index : -1}
             selectionMode={selectionMode}
             selected={selectedIds?.has(item.id) ?? false}
             onToggleSelect={

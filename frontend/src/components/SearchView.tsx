@@ -4,23 +4,25 @@ import type { SearchFilters } from '../api/client'
 interface SearchViewProps {
   query: string
   onQueryChange: (q: string) => void
-  onSearch: () => void
   searching: boolean
+  pending?: boolean
   filters: SearchFilters
   onFiltersChange: (f: SearchFilters) => void
   showFilters: boolean
   onToggleFilters: () => void
+  resultCount?: number
 }
 
 export function SearchView({
   query,
   onQueryChange,
-  onSearch,
   searching,
+  pending = false,
   filters,
   onFiltersChange,
   showFilters,
   onToggleFilters,
+  resultCount,
 }: SearchViewProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -28,46 +30,57 @@ export function SearchView({
     inputRef.current?.focus()
   }, [])
 
+  const status = searching
+    ? 'Searching…'
+    : pending && query.trim()
+      ? 'Waiting for you to pause…'
+      : query.trim() && resultCount !== undefined
+        ? resultCount === 0
+          ? 'No matches'
+          : `${resultCount} result${resultCount === 1 ? '' : 's'}`
+        : query.trim()
+          ? ''
+          : 'Start typing to search'
+
   return (
     <section className="search-panel relative z-10 mx-auto w-full max-w-3xl px-4 pb-6 pt-2 md:px-8 md:pt-8">
-      <p className="type-heading mb-1 hidden text-text-primary md:block">
-        Search
-      </p>
-      <p className="type-eyebrow mb-4 hidden text-text-muted md:block">
-        Mood, color, or words inside your images
+      <p className="type-heading mb-1 hidden text-text-primary md:block">Search</p>
+      <p className="type-caption mb-4 hidden text-text-muted md:block">
+        Find images by feeling, color, or text inside them
       </p>
       <input
         ref={inputRef}
         type="search"
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && onSearch()}
-        placeholder="Search"
+        placeholder="Mood, color, or words you remember"
         className="search-input"
         aria-label="Search your library"
       />
-      <p className="search-hint type-eyebrow mt-2 text-text-muted md:hidden">
-        Mood · color · text in images
-      </p>
-      <div className="mt-5 flex flex-wrap items-center gap-3">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p
+          className={`type-eyebrow search-status ${searching || pending ? 'pulse-soft' : ''}`}
+          aria-live="polite"
+        >
+          {status}
+        </p>
         <button
           type="button"
-          onClick={onSearch}
-          disabled={searching || !query.trim()}
-          className="btn-primary"
+          onClick={onToggleFilters}
+          className={`btn-ghost search-filter-toggle ${showFilters ? 'search-filter-toggle-active' : ''}`}
+          aria-expanded={showFilters}
         >
-          {searching ? 'Searching…' : 'Search'}
-        </button>
-        <button type="button" onClick={onToggleFilters} className="btn-ghost">
           Filters
         </button>
-        <kbd className="type-eyebrow ml-auto hidden md:inline">Press /</kbd>
+        <span className="type-eyebrow ml-auto hidden text-text-faint md:inline">
+          Press <kbd className="search-kbd">/</kbd> anywhere
+        </span>
       </div>
 
       {showFilters && (
-        <div className="panel-slide mt-8 flex flex-wrap gap-6 border-t border-border pt-6 text-sm">
+        <div className="search-filters panel-slide mt-8 border-t border-border pt-6">
           <FilterSelect
-            label="Text"
+            label="Text in image"
             value={filters.hasText}
             onChange={(v) =>
               onFiltersChange({
@@ -76,39 +89,50 @@ export function SearchView({
               })
             }
             options={[
-              ['all', 'All'],
-              ['yes', 'Has text'],
-              ['no', 'Visual only'],
+              ['all', 'Any'],
+              ['yes', 'With readable text'],
+              ['no', 'Images only'],
             ]}
           />
-          <label className="flex items-center gap-2 text-text-muted">
-            <span className="type-eyebrow">Folder</span>
+          <label className="filter-field">
+            <span className="type-eyebrow filter-field-label">Folder</span>
             <input
               type="text"
               value={filters.folder}
               onChange={(e) =>
                 onFiltersChange({ ...filters, folder: e.target.value })
               }
-              className="rounded-lg border border-border bg-bg-elevated px-2 py-1 text-text-primary"
+              placeholder="Optional path filter"
+              className="filter-input"
             />
           </label>
-          <label className="flex items-center gap-2 text-text-muted">
-            <span className="type-eyebrow">Match</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={filters.minSimilarity * 100}
-              onChange={(e) =>
-                onFiltersChange({
-                  ...filters,
-                  minSimilarity: Number(e.target.value) / 100,
-                })
-              }
-              className="accent-accent w-24"
-            />
-            <span className="font-mono text-xs">
-              {Math.round(filters.minSimilarity * 100)}%
+          <label className="filter-field filter-field-range">
+            <span className="type-eyebrow filter-field-label">
+              Minimum match
+            </span>
+            <div className="filter-range-row">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={filters.minSimilarity * 100}
+                onChange={(e) =>
+                  onFiltersChange({
+                    ...filters,
+                    minSimilarity: Number(e.target.value) / 100,
+                  })
+                }
+                className="filter-range accent-accent"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(filters.minSimilarity * 100)}
+              />
+              <span className="type-meta filter-range-value">
+                {Math.round(filters.minSimilarity * 100)}%
+              </span>
+            </div>
+            <span className="type-caption filter-field-hint">
+              Lower values return broader matches
             </span>
           </label>
         </div>
@@ -129,12 +153,12 @@ function FilterSelect({
   options: [string, string][]
 }) {
   return (
-    <label className="flex items-center gap-2 text-text-muted">
-      <span className="type-eyebrow">{label}</span>
+    <label className="filter-field">
+      <span className="type-eyebrow filter-field-label">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-lg border border-border bg-bg-elevated px-2 py-1 text-text-primary"
+        className="filter-select"
       >
         {options.map(([v, l]) => (
           <option key={v} value={v}>

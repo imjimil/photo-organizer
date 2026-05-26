@@ -86,6 +86,8 @@ export function useBrowseFeed(
       setOffset((prev) => prev + data.items.length)
       setHasMore(data.has_more)
       setTotal(data.total)
+    } catch {
+      setHasMore(false)
     } finally {
       setLoading(false)
     }

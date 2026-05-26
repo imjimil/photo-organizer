@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createAlbum,
   getAlbums,
@@ -17,18 +17,23 @@ import { AlbumSheet } from './components/AlbumSheet'
 import { BottomNav } from './components/BottomNav'
 import { CollectionDetailHeader } from './components/CollectionDetailHeader'
 import { CollectionsView } from './components/CollectionsView'
-import {
-  defaultCollectionScope,
-  type CollectionScope,
-} from './components/LibraryBar'
+import { ContextHint } from './components/ContextHint'
+import { LibraryEmpty } from './components/LibraryEmpty'
 import { DiscoverView } from './components/DiscoverView'
 import { Lightbox } from './components/Lightbox'
 import { PhotoGrid } from './components/PhotoGrid'
 import { SearchView } from './components/SearchView'
 import { SelectionBar } from './components/SelectionBar'
 import { MobileHeader, TopNav, type AppView } from './components/TopNav'
+import {
+  defaultCollectionScope,
+  type CollectionScope,
+} from './components/LibraryBar'
 import { useBrowseFeed } from './hooks/useBrowseFeed'
+import { useDebouncedValue } from './hooks/useDebouncedValue'
+import { useDismissibleHint } from './hooks/useDismissibleHint'
 import { useTheme } from './hooks/useTheme'
+import { useToast } from './hooks/useToast'
 
 const defaultFilters: SearchFilters = {
   hasText: 'all',
@@ -37,10 +42,15 @@ const defaultFilters: SearchFilters = {
 }
 
 export default function App() {
+  const { toast } = useToast()
   const { mode: themeMode, cycle: cycleTheme } = useTheme()
+  const selectHint = useDismissibleHint('opal-hint-select')
+  const searchHint = useDismissibleHint('opal-hint-search')
+  const searchGenRef = useRef(0)
   const [view, setView] = useState<AppView>('library')
   const [collectionScope, setCollectionScope] = useState<CollectionScope>(defaultCollectionScope)
   const [query, setQuery] = useState('')
+  const debouncedQuery = useDebouncedValue(query, 400)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -92,17 +102,18 @@ export default function App() {
   const refreshAlbums = useCallback(() => {
     getAlbums()
       .then((r) => setAlbums(r.albums))
-      .catch(() => {})
-  }, [])
+      .catch(() => toast('Could not load albums', 'error'))
+  }, [toast])
 
   const handleReorderAlbums = useCallback(async (albumIds: string[]) => {
     try {
       await reorderAlbums(albumIds)
       refreshAlbums()
     } catch {
+      toast('Could not save album order', 'error')
       refreshAlbums()
     }
-  }, [refreshAlbums])
+  }, [refreshAlbums, toast])
 
   const exitSelection = useCallback(() => {
     setSelectionMode(false)
@@ -113,12 +124,12 @@ export default function App() {
   useEffect(() => {
     getStats()
       .then((s) => setStatsTotal(s.browse_ready))
-      .catch(() => {})
+      .catch(() => toast('Could not reach the API. Start it with npm run dev:api', 'error'))
     getCollections()
       .then((r) => setCollections(r.collections))
       .catch(() => {})
     refreshAlbums()
-  }, [refreshAlbums])
+  }, [refreshAlbums, toast])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -137,18 +148,40 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [selectionMode, exitSelection])
 
-  const runSearch = useCallback(async () => {
-    if (!query.trim()) return
-    setSearching(true)
-    try {
-      const data = await search(query.trim(), 48, filters)
-      setSearchResults(data.results)
-    } catch {
+  const runSearch = useCallback(
+    async (term: string) => {
+      const q = term.trim()
+      if (!q) {
+        setSearchResults([])
+        setSearching(false)
+        return
+      }
+      const gen = ++searchGenRef.current
+      setSearching(true)
+      try {
+        const data = await search(q, 48, filters)
+        if (gen !== searchGenRef.current) return
+        setSearchResults(data.results)
+      } catch {
+        if (gen !== searchGenRef.current) return
+        setSearchResults([])
+        toast('Search failed. Check that the API is running.', 'error')
+      } finally {
+        if (gen === searchGenRef.current) setSearching(false)
+      }
+    },
+    [filters, toast],
+  )
+
+  useEffect(() => {
+    if (view !== 'search') return
+    if (!debouncedQuery.trim()) {
       setSearchResults([])
-    } finally {
       setSearching(false)
+      return
     }
-  }, [query, filters])
+    runSearch(debouncedQuery)
+  }, [debouncedQuery, filters, view, runSearch])
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -235,8 +268,9 @@ export default function App() {
       setNewAlbumOpen(false)
       refreshAlbums()
       handleOpenAlbum(album)
+      toast(`Album "${name}" created`, 'success')
     } catch {
-      /* ignore */
+      toast('Could not create album', 'error')
     }
   }
 
@@ -269,13 +303,24 @@ export default function App() {
       ? 'This folder has no indexed photos yet.'
       : 'This album is empty. Select photos from your library and add them here.'
 
+  const searchPending = view === 'search' && query.trim() !== debouncedQuery.trim()
   const searchStatus = searching
     ? 'Searching'
-    : view === 'search' && query.trim() && searchResults.length > 0
-      ? `${searchResults.length} results`
-      : view === 'search' && query.trim() && searchResults.length === 0
-        ? 'No results'
-        : ''
+    : searchPending
+      ? 'Updating results'
+      : view === 'search' && debouncedQuery.trim() && searchResults.length > 0
+        ? `${searchResults.length} results`
+        : view === 'search' && debouncedQuery.trim() && searchResults.length === 0 && !searching
+          ? 'No results'
+          : ''
+
+  const showLibraryEmpty =
+    view === 'library' &&
+    !libraryLoading &&
+    !libraryError &&
+    libraryItems.length === 0
+
+  const libraryIndexed = statsTotal > 0 || libraryTotal > 0
 
   const lightboxIds =
     view === 'library'
@@ -334,10 +379,18 @@ export default function App() {
               ? enterSelectionMode
               : undefined
           }
+          sort={feedSort}
+          onSortChange={setFeedSort}
+          showSort={view === 'library'}
         />
 
         {view === 'library' && (
           <div key="library" className="view-enter flex flex-1 flex-col">
+            {selectHint.visible && !selectionMode && libraryItems.length > 0 && (
+              <ContextHint onDismiss={selectHint.dismiss} label="Selection tip">
+                Tap <strong>Select</strong> to choose photos, or long-press a tile. Drag across the grid to select many at once.
+              </ContextHint>
+            )}
             {selectionMode && (
               <button
                 type="button"
@@ -361,6 +414,12 @@ export default function App() {
               className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6 md:pb-12"
               onClick={handleGridMainClick}
             >
+              {showLibraryEmpty ? (
+                <LibraryEmpty
+                  indexed={libraryIndexed}
+                  onTryDiscover={() => setView('discover')}
+                />
+              ) : (
               <PhotoGrid
                 items={libraryItems}
                 onSelect={(item) => {
@@ -379,6 +438,7 @@ export default function App() {
                 onDeselectId={deselectId}
                 selectable
               />
+              )}
             </main>
           </div>
         )}
@@ -468,33 +528,38 @@ export default function App() {
 
         {view === 'search' && (
           <div key="search" className="view-enter flex flex-1 flex-col">
+            {searchHint.visible && (
+              <ContextHint onDismiss={searchHint.dismiss} label="Search tip">
+                Results update as you type. Press <strong>/</strong> from anywhere to jump here.
+              </ContextHint>
+            )}
             <SearchView
               query={query}
               onQueryChange={setQuery}
-              onSearch={runSearch}
               searching={searching}
+              pending={searchPending}
               filters={filters}
               onFiltersChange={setFilters}
               showFilters={showFilters}
               onToggleFilters={() => setShowFilters((v) => !v)}
+              resultCount={
+                debouncedQuery.trim() && !searching && !searchPending
+                  ? searchResults.length
+                  : undefined
+              }
             />
             <main id="main-content" className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6">
-              {searching && (
-                <p className="type-eyebrow pulse-soft py-16 text-center">
-                  Searching
-                </p>
-              )}
-              {!searching && searchResults.length === 0 && query.trim() && (
+              {!searching && !searchPending && searchResults.length === 0 && debouncedQuery.trim() && (
                 <p className="type-quote mx-auto max-w-md px-4 py-20 text-center text-text-muted">
-                  Nothing matched. Try a softer phrase or different filters.
+                  Nothing matched. Try a softer phrase, lower the match threshold, or different filters.
                 </p>
               )}
-              {!searching && searchResults.length === 0 && !query.trim() && (
+              {!searching && !searchPending && searchResults.length === 0 && !debouncedQuery.trim() && (
                 <p className="type-eyebrow mx-auto max-w-sm px-4 py-20 text-center">
                   Search by mood, color, or remembered words
                 </p>
               )}
-              {!searching && searchResults.length > 0 && (
+              {searchResults.length > 0 && (
                 <PhotoGrid
                   items={searchResults}
                   onSelect={(item) => setSelectedId(item.id)}

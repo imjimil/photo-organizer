@@ -161,44 +161,59 @@ def run_clip_phase(
 
 def update_chroma_documents(manifest: Manifest, chroma: ChromaStore) -> int:
     """Sync OCR text from manifest into Chroma documents after OCR phase."""
-    records = manifest.get_all_indexed()
+    records = [
+        record
+        for record in manifest.get_all_indexed()
+        if record.ocr_text and not record.duplicate_of
+    ]
     if not records:
         return 0
 
-    ids = [r.id for r in records if r.ocr_text]
-    if not ids:
-        return 0
-
     updated = 0
-    batch_ids: list[str] = []
-    batch_docs: list[str] = []
-    batch_meta: list[dict] = []
+    batch_size = 500
 
-    for record in records:
-        if record.duplicate_of or not record.ocr_text:
-            continue
-        batch_ids.append(record.content_hash)
-        batch_docs.append(record.ocr_text)
-        batch_meta.append(
+    for start in range(0, len(records), batch_size):
+        batch = records[start : start + batch_size]
+        batch_ids = [record.content_hash for record in batch]
+        batch_docs = [record.ocr_text for record in batch]
+        batch_meta = [
             {
                 "id": record.content_hash,
                 "rel_path": record.rel_path,
                 "has_text": record.has_text,
             }
-        )
+            for record in batch
+        ]
 
-        if len(batch_ids) >= 500:
-            chroma.collection.update(
-                ids=batch_ids, documents=batch_docs, metadatas=batch_meta
-            )
-            updated += len(batch_ids)
-            batch_ids, batch_docs, batch_meta = [], [], []
+        existing = chroma.collection.get(ids=batch_ids, include=["embeddings"])
+        id_to_embedding = dict(zip(existing["ids"], existing["embeddings"]))
 
-    if batch_ids:
+        sync_ids: list[str] = []
+        sync_docs: list[str] = []
+        sync_meta: list[dict] = []
+        sync_embeddings: list[list[float]] = []
+
+        for doc_id, doc, meta in zip(batch_ids, batch_docs, batch_meta):
+            embedding = id_to_embedding.get(doc_id)
+            if embedding is None:
+                continue
+            sync_ids.append(doc_id)
+            sync_docs.append(doc)
+            sync_meta.append(meta)
+            sync_embeddings.append(embedding)
+
+        if not sync_ids:
+            continue
+
+        # Keep existing CLIP vectors; updating documents alone would re-embed
+        # with Chroma's default model (384-d) and fail against our 512-d index.
         chroma.collection.update(
-            ids=batch_ids, documents=batch_docs, metadatas=batch_meta
+            ids=sync_ids,
+            documents=sync_docs,
+            metadatas=sync_meta,
+            embeddings=sync_embeddings,
         )
-        updated += len(batch_ids)
+        updated += len(sync_ids)
 
     return updated
 
