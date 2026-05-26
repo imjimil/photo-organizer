@@ -29,13 +29,40 @@ class BrowseResponse(BaseModel):
 
 
 class SearchResult(ImageSummary):
-    similarity: float
+    similarity: float | None = None
+    match_kind: str = "similar"
+
+
+class SearchPlanSummary(BaseModel):
+    raw: str = ""
+    vibe_text: str = ""
+    exact_phrases: list[str] = Field(default_factory=list)
+    include_words: list[str] = Field(default_factory=list)
+    exclude_words: list[str] = Field(default_factory=list)
+    include_folders: list[str] = Field(default_factory=list)
+    exclude_folders: list[str] = Field(default_factory=list)
+    has_text: bool | None = None
+    date_after: str | None = None
+    date_before: str | None = None
+    match: str = "balanced"
+    mode: str = "vibe"
 
 
 class SearchResponse(BaseModel):
     query: str
+    plan: SearchPlanSummary
     results: list[SearchResult]
     total: int
+
+
+class SearchHistoryEntry(BaseModel):
+    query: str
+    plan: SearchPlanSummary
+    searched_at: str
+
+
+class SearchHistoryResponse(BaseModel):
+    items: list[SearchHistoryEntry]
 
 
 class ImageDetail(BaseModel):

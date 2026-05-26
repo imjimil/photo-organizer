@@ -9,7 +9,25 @@ export interface ImageSummary {
 }
 
 export interface SearchResult extends ImageSummary {
-  similarity: number
+  similarity?: number | null
+  match_kind?: 'exact' | 'include' | 'similar'
+}
+
+export type MatchFeel = 'broad' | 'balanced' | 'strict'
+
+export interface SearchPlanSummary {
+  raw: string
+  vibe_text: string
+  exact_phrases: string[]
+  include_words: string[]
+  exclude_words: string[]
+  include_folders: string[]
+  exclude_folders: string[]
+  has_text: boolean | null
+  date_after: string | null
+  date_before: string | null
+  match: MatchFeel
+  mode: string
 }
 
 export interface BrowseResponse {
@@ -22,8 +40,15 @@ export interface BrowseResponse {
 
 export interface SearchResponse {
   query: string
+  plan: SearchPlanSummary
   results: SearchResult[]
   total: number
+}
+
+export interface SearchHistoryEntry {
+  query: string
+  plan: SearchPlanSummary
+  searched_at: string
 }
 
 export interface ImageDetail extends ImageSummary {
@@ -83,9 +108,9 @@ export interface DiscoverResponse {
 }
 
 export interface SearchFilters {
+  match: MatchFeel
   hasText: 'all' | 'yes' | 'no'
   folder: string
-  minSimilarity: number
 }
 
 export interface BrowseOptions {
@@ -136,17 +161,28 @@ export function discover(limit = 1, exclude: string[] = []) {
 
 export function search(
   q: string,
-  limit = 24,
+  limit = 48,
   filters?: Partial<SearchFilters>,
+  signal?: AbortSignal,
 ) {
   const params = new URLSearchParams({ q, limit: String(limit) })
   if (filters?.hasText === 'yes') params.set('has_text', 'true')
   if (filters?.hasText === 'no') params.set('has_text', 'false')
   if (filters?.folder) params.set('folder', filters.folder)
-  if (filters?.minSimilarity && filters.minSimilarity > 0) {
-    params.set('min_similarity', String(filters.minSimilarity))
-  }
-  return fetchJson<SearchResponse>(`${BASE}/search?${params}`)
+  if (filters?.match) params.set('match', filters.match)
+  return fetchJson<SearchResponse>(`${BASE}/search?${params}`, { signal })
+}
+
+export function getSearchHistory(limit = 12) {
+  return fetchJson<{ items: SearchHistoryEntry[] }>(
+    `${BASE}/search/history?limit=${limit}`,
+  )
+}
+
+export function clearSearchHistory() {
+  return fetchJson<{ status: string }>(`${BASE}/search/history`, {
+    method: 'DELETE',
+  })
 }
 
 export function getImage(id: string) {

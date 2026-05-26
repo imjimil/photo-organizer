@@ -6,7 +6,7 @@ import { ImageCard } from './ImageCard'
 interface PhotoGridProps {
   items: (ImageSummary | SearchResult)[]
   onSelect: (item: ImageSummary | SearchResult) => void
-  showSimilarity?: boolean
+  showMatchKind?: boolean
   onLoadMore?: () => void
   hasMore?: boolean
   loading?: boolean
@@ -24,7 +24,7 @@ interface PhotoGridProps {
 export function PhotoGrid({
   items,
   onSelect,
-  showSimilarity,
+  showMatchKind,
   onLoadMore,
   hasMore,
   loading,
@@ -96,7 +96,7 @@ export function PhotoGrid({
               if (drag.shouldSuppressClick()) return
               onSelect(item)
             }}
-            showSimilarity={showSimilarity}
+            showMatchKind={showMatchKind}
             staggerIndex={index < 20 ? index : -1}
             selectionMode={selectionMode}
             selected={selectedIds?.has(item.id) ?? false}

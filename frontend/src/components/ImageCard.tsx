@@ -6,7 +6,7 @@ interface ImageCardProps {
   photoId: string
   item: ImageSummary | SearchResult
   onClick: () => void
-  showSimilarity?: boolean
+  showMatchKind?: boolean
   staggerIndex?: number
   selectionMode?: boolean
   selected?: boolean
@@ -19,7 +19,7 @@ export function ImageCard({
   photoId,
   item,
   onClick,
-  showSimilarity,
+  showMatchKind,
   staggerIndex = 0,
   selectionMode = false,
   selected = false,
@@ -27,8 +27,17 @@ export function ImageCard({
   onBeginSelection,
   selectable = false,
 }: ImageCardProps) {
-  const similarity =
-    'similarity' in item ? (item as SearchResult).similarity : undefined
+  const matchKind =
+    'match_kind' in item ? (item as SearchResult).match_kind : undefined
+
+  const matchLabel =
+    matchKind === 'exact'
+      ? 'Exact'
+      : matchKind === 'include'
+        ? 'Contains'
+        : matchKind === 'similar'
+          ? 'Similar'
+          : null
 
   const handleOpen = () => {
     if (selectionMode && onToggleSelect) {
@@ -78,10 +87,8 @@ export function ImageCard({
           </span>
         )}
         {selected && selectionMode && <span className="photo-select-overlay" aria-hidden />}
-        {showSimilarity && similarity !== undefined && (
-          <span className="photo-similarity-badge">
-            {(similarity * 100).toFixed(0)}
-          </span>
+        {showMatchKind && matchLabel && (
+          <span className="photo-match-badge">{matchLabel}</span>
         )}
       </button>
 

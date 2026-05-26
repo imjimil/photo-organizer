@@ -8,7 +8,7 @@ import {
   search,
   type AlbumSummary,
   type CollectionSummary,
-  type SearchFilters,
+  type SearchPlanSummary,
   type SearchResult,
 } from './api/client'
 import { AlbumPicker } from './components/AlbumPicker'
@@ -34,29 +34,33 @@ import { useDebouncedValue } from './hooks/useDebouncedValue'
 import { useDismissibleHint } from './hooks/useDismissibleHint'
 import { useTheme } from './hooks/useTheme'
 import { useToast } from './hooks/useToast'
-
-const defaultFilters: SearchFilters = {
-  hasText: 'all',
-  folder: '',
-  minSimilarity: 0,
-}
+import { useSearchHistory } from './hooks/useSearchHistory'
+import {
+  apiSearchQuery,
+  chipsAreActive,
+  chipsFromPlan,
+  defaultChipState,
+  type SearchChipState,
+} from './search/plan'
 
 export default function App() {
   const { toast } = useToast()
   const { mode: themeMode, cycle: cycleTheme } = useTheme()
   const selectHint = useDismissibleHint('opal-hint-select')
   const searchHint = useDismissibleHint('opal-hint-search')
-  const searchGenRef = useRef(0)
+  const searchAbortRef = useRef<AbortController | null>(null)
+  const { items: searchHistory, record: recordSearchHistory, clear: clearSearchHistory } =
+    useSearchHistory()
   const [view, setView] = useState<AppView>('library')
   const [collectionScope, setCollectionScope] = useState<CollectionScope>(defaultCollectionScope)
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebouncedValue(query, 400)
+  const [chips, setChips] = useState<SearchChipState>(defaultChipState)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searchPlan, setSearchPlan] = useState<SearchPlanSummary | null>(null)
   const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [discoverIds, setDiscoverIds] = useState<string[]>([])
-  const [filters, setFilters] = useState<SearchFilters>(defaultFilters)
-  const [showFilters, setShowFilters] = useState(false)
   const [statsTotal, setStatsTotal] = useState(0)
   const [collections, setCollections] = useState<CollectionSummary[]>([])
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
@@ -149,39 +153,57 @@ export default function App() {
   }, [selectionMode, exitSelection])
 
   const runSearch = useCallback(
-    async (term: string) => {
-      const q = term.trim()
+    async (term: string, activeChips: SearchChipState) => {
+      const q = apiSearchQuery(term, activeChips)
       if (!q) {
         setSearchResults([])
+        setSearchPlan(null)
         setSearching(false)
         return
       }
-      const gen = ++searchGenRef.current
+
+      searchAbortRef.current?.abort()
+      const controller = new AbortController()
+      searchAbortRef.current = controller
+
       setSearching(true)
       try {
-        const data = await search(q, 48, filters)
-        if (gen !== searchGenRef.current) return
+        const data = await search(
+          q,
+          48,
+          {
+            match: activeChips.match,
+            hasText: activeChips.content,
+            folder: activeChips.folder,
+          },
+          controller.signal,
+        )
+        if (controller.signal.aborted) return
         setSearchResults(data.results)
+        setSearchPlan(data.plan)
+        if (data.results.length > 0) {
+          recordSearchHistory(term.trim() || q.trim(), data.plan)
+        }
       } catch {
-        if (gen !== searchGenRef.current) return
+        if (controller.signal.aborted) return
         setSearchResults([])
+        setSearchPlan(null)
         toast('Search failed. Check that the API is running.', 'error')
       } finally {
-        if (gen === searchGenRef.current) setSearching(false)
+        if (!controller.signal.aborted) setSearching(false)
       }
     },
-    [filters, toast],
+    [recordSearchHistory, toast],
   )
 
   useEffect(() => {
     if (view !== 'search') return
-    if (!debouncedQuery.trim()) {
-      setSearchResults([])
-      setSearching(false)
-      return
-    }
-    runSearch(debouncedQuery)
-  }, [debouncedQuery, filters, view, runSearch])
+    runSearch(debouncedQuery, chips)
+  }, [debouncedQuery, chips, view, runSearch])
+
+  useEffect(() => {
+    return () => searchAbortRef.current?.abort()
+  }, [])
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -304,13 +326,15 @@ export default function App() {
       : 'This album is empty. Select photos from your library and add them here.'
 
   const searchPending = view === 'search' && query.trim() !== debouncedQuery.trim()
+  const searchActive =
+    view === 'search' && (debouncedQuery.trim() !== '' || chipsAreActive(chips))
   const searchStatus = searching
     ? 'Searching'
     : searchPending
       ? 'Updating results'
-      : view === 'search' && debouncedQuery.trim() && searchResults.length > 0
+      : searchActive && searchResults.length > 0
         ? `${searchResults.length} results`
-        : view === 'search' && debouncedQuery.trim() && searchResults.length === 0 && !searching
+        : searchActive && searchResults.length === 0 && !searching && !searchPending
           ? 'No results'
           : ''
 
@@ -536,34 +560,40 @@ export default function App() {
             <SearchView
               query={query}
               onQueryChange={setQuery}
+              chips={chips}
+              onChipsChange={setChips}
+              collections={collections}
               searching={searching}
               pending={searchPending}
-              filters={filters}
-              onFiltersChange={setFilters}
-              showFilters={showFilters}
-              onToggleFilters={() => setShowFilters((v) => !v)}
+              plan={searchPlan}
               resultCount={
-                debouncedQuery.trim() && !searching && !searchPending
+                searchActive && !searching && !searchPending
                   ? searchResults.length
                   : undefined
               }
+              history={searchHistory}
+              onPickHistory={(entry) => {
+                setQuery(entry.plan.vibe_text || entry.query)
+                setChips(chipsFromPlan(entry.plan))
+              }}
+              onClearHistory={clearSearchHistory}
             />
-            <main id="main-content" className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6">
-              {!searching && !searchPending && searchResults.length === 0 && debouncedQuery.trim() && (
-                <p className="type-quote mx-auto max-w-md px-4 py-20 text-center text-text-muted">
-                  Nothing matched. Try a softer phrase, lower the match threshold, or different filters.
+            <main id="main-content" className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 pt-1 md:px-6">
+              {!searching && !searchPending && searchResults.length === 0 && searchActive && (
+                <p className="type-caption mx-auto max-w-md px-4 py-12 text-center text-text-muted">
+                  Nothing matched. Try Broad match, fewer filters, or different words.
                 </p>
               )}
-              {!searching && !searchPending && searchResults.length === 0 && !debouncedQuery.trim() && (
-                <p className="type-eyebrow mx-auto max-w-sm px-4 py-20 text-center">
-                  Search by mood, color, or remembered words
+              {!searching && !searchPending && searchResults.length === 0 && !searchActive && (
+                <p className="type-caption mx-auto max-w-sm px-4 py-10 text-center text-text-faint">
+                  Search by mood, exact quotes, or tap the filter icon
                 </p>
               )}
               {searchResults.length > 0 && (
                 <PhotoGrid
                   items={searchResults}
                   onSelect={(item) => setSelectedId(item.id)}
-                  showSimilarity
+                  showMatchKind
                 />
               )}
             </main>

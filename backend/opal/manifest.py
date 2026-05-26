@@ -1,6 +1,7 @@
 """SQLite manifest — source of truth for indexed photos."""
 
 import hashlib
+import json
 import logging
 import sqlite3
 import uuid
@@ -8,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Literal
 
 from opal.config import CLIP_MODEL, IMAGE_FOLDER, MANIFEST_PATH, ensure_dirs
 from opal.scanner import ScannedFile, with_content_hash
@@ -107,6 +108,19 @@ class Manifest:
         with self._connect() as conn:
             conn.executescript(SCHEMA)
             self._migrate_albums(conn)
+            self._migrate_search_history(conn)
+
+    def _migrate_search_history(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS search_history (
+                id TEXT PRIMARY KEY,
+                query TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                searched_at TEXT NOT NULL
+            )
+            """
+        )
 
     def _migrate_albums(self, conn: sqlite3.Connection) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(albums)")}
@@ -861,3 +875,177 @@ class Manifest:
                 "SELECT id, ocr_text FROM photos WHERE ocr_text != ''"
             ).fetchall()
         return {row["id"]: row["ocr_text"] for row in rows}
+
+    def _indexed_where(self) -> tuple[str, list]:
+        return (
+            "status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL",
+            [],
+        )
+
+    def _photo_date_sql(self) -> str:
+        return "COALESCE(substr(exif_date, 1, 10), date(mtime, 'unixepoch'))"
+
+    def search_ocr_filtered(
+        self,
+        *,
+        exact_phrases: list[str],
+        include_words: list[str],
+        include_folders: list[str],
+        has_text: bool | None,
+        date_after: str | None,
+        date_before: str | None,
+        limit: int,
+    ) -> list[tuple[PhotoRecord, Literal["exact", "include"]]]:
+        if not exact_phrases and not include_words:
+            return []
+
+        where, params = self._indexed_where()
+        if has_text is True:
+            where += " AND has_text = 1"
+        elif has_text is False:
+            where += " AND has_text = 0"
+
+        for folder in include_folders:
+            where += " AND (rel_path LIKE ? OR rel_path = ?)"
+            params.extend([f"{folder}/%", folder])
+
+        date_sql = self._photo_date_sql()
+        if date_after:
+            where += f" AND {date_sql} >= ?"
+            params.append(date_after[:10])
+        if date_before:
+            where += f" AND {date_sql} < ?"
+            params.append(date_before[:10])
+
+        for phrase in exact_phrases:
+            where += " AND LOWER(ocr_text) LIKE ?"
+            params.append(f"%{phrase.lower()}%")
+
+        for word in include_words:
+            where += " AND LOWER(ocr_text) LIKE ?"
+            params.append(f"%{word.lower()}%")
+
+        sql = f"""
+            SELECT * FROM photos
+            WHERE {where}
+            ORDER BY mtime DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        results: list[tuple[PhotoRecord, Literal["exact", "include"]]] = []
+        for row in rows:
+            record = self._row_to_record(row)
+            kind: Literal["exact", "include"] = (
+                "exact"
+                if exact_phrases
+                and all(p.lower() in record.ocr_text.lower() for p in exact_phrases)
+                else "include"
+            )
+            results.append((record, kind))
+        return results
+
+    def list_filtered(
+        self,
+        *,
+        include_folders: list[str],
+        has_text: bool | None,
+        date_after: str | None,
+        date_before: str | None,
+        limit: int,
+    ) -> list[PhotoRecord]:
+        where, params = self._indexed_where()
+        if has_text is True:
+            where += " AND has_text = 1"
+        elif has_text is False:
+            where += " AND has_text = 0"
+
+        if len(include_folders) == 1:
+            folder = include_folders[0]
+            where += " AND (rel_path LIKE ? OR rel_path = ?)"
+            params.extend([f"{folder}/%", folder])
+        elif len(include_folders) > 1:
+            clauses = []
+            for folder in include_folders:
+                clauses.append("(rel_path LIKE ? OR rel_path = ?)")
+                params.extend([f"{folder}/%", folder])
+            where += " AND (" + " OR ".join(clauses) + ")"
+
+        date_sql = self._photo_date_sql()
+        if date_after:
+            where += f" AND {date_sql} >= ?"
+            params.append(date_after[:10])
+        if date_before:
+            where += f" AND {date_sql} < ?"
+            params.append(date_before[:10])
+
+        sql = f"""
+            SELECT * FROM photos
+            WHERE {where}
+            ORDER BY mtime DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def save_search_history(self, query: str, plan: dict) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        entry_id = uuid.uuid4().hex
+        plan_json = json.dumps(plan)
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM search_history WHERE query = ?",
+                (query,),
+            )
+            conn.execute(
+                """
+                INSERT INTO search_history (id, query, plan_json, searched_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (entry_id, query, plan_json, now),
+            )
+            conn.execute(
+                """
+                DELETE FROM search_history
+                WHERE id NOT IN (
+                    SELECT id FROM search_history
+                    ORDER BY searched_at DESC
+                    LIMIT 50
+                )
+                """
+            )
+
+    def list_search_history(self, limit: int = 12) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT query, plan_json, searched_at
+                FROM search_history
+                ORDER BY searched_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        results = []
+        for row in rows:
+            try:
+                plan = json.loads(row["plan_json"])
+            except json.JSONDecodeError:
+                plan = {}
+            results.append(
+                {
+                    "query": row["query"],
+                    "plan": plan,
+                    "searched_at": row["searched_at"],
+                }
+            )
+        return results
+
+    def clear_search_history(self) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM search_history")

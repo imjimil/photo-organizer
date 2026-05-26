@@ -23,6 +23,8 @@ from opal.api.schemas import (
     FavoriteStatusResponse,
     ImageDetail,
     ImageSummary,
+    SearchHistoryResponse,
+    SearchPlanSummary,
     SearchResponse,
     SearchResult,
     SimilarResponse,
@@ -32,6 +34,7 @@ from opal.api.schemas import (
 )
 from opal.config import IMAGE_FOLDER, setup_logging
 from opal.manifest import path_id
+from opal.search import MatchLevel, execute_search, merge_plan, parse_search
 from opal.thumbnails import get_display_image
 
 setup_logging()
@@ -279,56 +282,70 @@ def discover(
 @app.get("/api/search", response_model=SearchResponse)
 def search(
     q: str = Query(..., min_length=1),
-    limit: int = Query(24, ge=1, le=100),
+    limit: int = Query(48, ge=1, le=100),
+    match: MatchLevel | None = Query(None),
     has_text: bool | None = None,
     folder: str | None = None,
-    min_similarity: float = Query(0.0, ge=0.0, le=1.0),
+    min_similarity: float | None = Query(None, ge=0.0, le=1.0),
 ):
     embedder = get_embedder()
     chroma = get_chroma()
     manifest = get_manifest()
 
-    query_vector = embedder.embed_text(q)
-    where = None
-    if has_text is True:
-        where = {"has_text": True}
-    elif has_text is False:
-        where = {"has_text": False}
+    plan = parse_search(q)
+    chip_has_text = has_text
+    merge_plan(plan, match=match, has_text=chip_has_text, folder=folder or None)
 
-    fetch_n = min(limit * 3 if (folder or min_similarity > 0) else limit, 100)
-    raw = chroma.query(
-        query_embedding=query_vector,
-        query_text=q,
-        n_results=fetch_n,
-        where=where,
+    if min_similarity is not None and min_similarity > 0:
+        if min_similarity >= 0.4:
+            plan.match = "strict"
+        elif min_similarity >= 0.2:
+            plan.match = "balanced"
+        else:
+            plan.match = "broad"
+
+    hits = execute_search(plan, manifest, chroma, embedder, limit=limit)
+    results: list[SearchResult] = []
+    for record, match_kind, similarity in hits:
+        summary = record_to_summary(record)
+        results.append(
+            SearchResult(
+                **summary,
+                similarity=similarity,
+                match_kind=match_kind,
+            )
+        )
+
+    if results:
+        manifest.save_search_history(q, plan.to_summary())
+
+    return SearchResponse(
+        query=q,
+        plan=SearchPlanSummary(**plan.to_summary()),
+        results=results,
+        total=len(results),
     )
 
-    results: list[SearchResult] = []
-    if not raw.get("metadatas") or not raw["metadatas"][0]:
-        return SearchResponse(query=q, results=[], total=0)
 
-    for idx, (cid, meta, dist) in enumerate(
-        zip(
-            raw["ids"][0],
-            raw["metadatas"][0],
-            raw.get("distances", [[]])[0],
+@app.get("/api/search/history", response_model=SearchHistoryResponse)
+def search_history(limit: int = Query(12, ge=1, le=50)):
+    manifest = get_manifest()
+    items = []
+    for row in manifest.list_search_history(limit=limit):
+        items.append(
+            {
+                "query": row["query"],
+                "plan": SearchPlanSummary(**row.get("plan", {})),
+                "searched_at": row["searched_at"],
+            }
         )
-    ):
-        similarity = 1.0 - dist
-        if similarity < min_similarity:
-            continue
-        rel_path = meta.get("rel_path", "")
-        if folder and folder not in rel_path:
-            continue
-        record = manifest.get_by_id(cid)
-        if not record:
-            continue
-        summary = record_to_summary(record)
-        results.append(SearchResult(**summary, similarity=round(similarity, 4)))
-        if len(results) >= limit:
-            break
+    return SearchHistoryResponse(items=items)
 
-    return SearchResponse(query=q, results=results, total=len(results))
+
+@app.delete("/api/search/history")
+def clear_search_history():
+    get_manifest().clear_search_history()
+    return {"status": "ok"}
 
 
 @app.get("/api/images/{image_id}", response_model=ImageDetail)
