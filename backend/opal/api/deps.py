@@ -28,7 +28,7 @@ def get_embedder() -> CLIPEmbedder:
 
 
 def record_to_summary(record: PhotoRecord) -> dict:
-    pid = path_id(record.rel_path)
+    pid = record.id
     preview = record.ocr_text.strip().replace("\n", " ")
     if len(preview) > 140:
         preview = preview[:137] + "..."

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import type { AlbumSummary, CollectionSummary } from '../api/client'
+import type { AlbumSummary, CollectionSummary, SourceSummary } from '../api/client'
 import { isFavoritesAlbum, thumbUrl } from '../api/client'
 import { useAlbumReorder } from '../hooks/useAlbumReorder'
 import { useFlipList } from '../hooks/useFlipList'
@@ -8,8 +8,10 @@ import { IconGrip, IconStar } from './ViewerIcons'
 
 interface CollectionsViewProps {
   albums: AlbumSummary[]
+  libraries: SourceSummary[]
   folders: CollectionSummary[]
   onOpenAlbum: (album: AlbumSummary) => void
+  onOpenLibrary: (library: SourceSummary) => void
   onOpenFolder: (folder: CollectionSummary) => void
   onNewAlbum: () => void
   onManageAlbum: (album: AlbumSummary) => void
@@ -18,8 +20,10 @@ interface CollectionsViewProps {
 
 export function CollectionsView({
   albums,
+  libraries,
   folders,
   onOpenAlbum,
+  onOpenLibrary,
   onOpenFolder,
   onNewAlbum,
   onManageAlbum,
@@ -55,6 +59,28 @@ export function CollectionsView({
 
   return (
     <div className="collections-view">
+      {libraries.length > 0 && (
+        <section className="collections-section" aria-labelledby="libraries-heading">
+          <div className="collections-section-head">
+            <h2 id="libraries-heading" className="type-heading text-text-primary">
+              Libraries
+            </h2>
+            <p className="type-caption text-text-muted">Folders you added to Opal</p>
+          </div>
+          <div className="collections-grid">
+            {libraries.map((library) => (
+              <CollectionCard
+                key={library.id}
+                title={library.name}
+                count={library.browse_count}
+                onOpen={() => onOpenLibrary(library)}
+                kind="folder"
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="collections-section" aria-labelledby="albums-heading">
         <div className="collections-section-head">
           <h2 id="albums-heading" className="type-heading text-text-primary">
@@ -134,9 +160,9 @@ export function CollectionsView({
         <section className="collections-section" aria-labelledby="folders-heading">
           <div className="collections-section-head">
             <h2 id="folders-heading" className="type-heading text-text-primary">
-              Folders
+              Subfolders
             </h2>
-            <p className="type-caption text-text-muted">From your library on disk</p>
+            <p className="type-caption text-text-muted">Groups inside your photos on disk</p>
           </div>
           <div className="collections-grid">
             {folders.map((folder) => (

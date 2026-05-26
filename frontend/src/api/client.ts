@@ -68,8 +68,30 @@ export interface StatsResponse {
 export interface SourceSummary {
   id: string
   name: string
+  path: string
   count: number
+  browse_count: number
   active: boolean
+  enabled: boolean
+  removed: boolean
+  last_scan_at: string | null
+  indexing_phase: string | null
+}
+
+export interface IndexStatus {
+  running: boolean
+  phase: string
+  source_id: string | null
+  current: number
+  total: number
+  percent: number
+  eta_seconds: number | null
+  rate_per_second: number
+  message: string
+  error: string | null
+  counts: Record<string, number>
+  search_ready_percent: number
+  browse_ready: number
 }
 
 export interface SourcesResponse {
@@ -116,6 +138,7 @@ export interface SearchFilters {
 export interface BrowseOptions {
   folder?: string
   album?: string
+  source_id?: string
 }
 
 const API_HOST = import.meta.env.VITE_API_HOST ?? 'http://127.0.0.1:8000'
@@ -123,6 +146,8 @@ const API_HOST = import.meta.env.VITE_API_HOST ?? 'http://127.0.0.1:8000'
 function isDesktopShell(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
+
+export { isDesktopShell }
 
 const BASE = isDesktopShell() ? `${API_HOST}/api` : '/api'
 
@@ -150,6 +175,7 @@ export function browse(
   })
   if (options?.folder) params.set('folder', options.folder)
   if (options?.album) params.set('album', options.album)
+  if (options?.source_id) params.set('source_id', options.source_id)
   return fetchJson<BrowseResponse>(`${BASE}/browse?${params}`)
 }
 
@@ -199,8 +225,44 @@ export function getStats() {
   return fetchJson<StatsResponse>(`${BASE}/stats`)
 }
 
-export function getSources() {
-  return fetchJson<SourcesResponse>(`${BASE}/sources`)
+export function getSources(includeRemoved = false) {
+  const params = includeRemoved ? '?include_removed=1' : ''
+  return fetchJson<SourcesResponse>(`${BASE}/sources${params}`)
+}
+
+export function addSource(path: string, name?: string) {
+  return fetchJson<SourceSummary>(`${BASE}/sources`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, name }),
+  })
+}
+
+export function removeSource(sourceId: string) {
+  return fetchJson<{ status: string }>(`${BASE}/sources/${sourceId}`, {
+    method: 'DELETE',
+  })
+}
+
+export function scanSource(sourceId: string) {
+  return fetchJson<{ status: string }>(`${BASE}/sources/${sourceId}/scan`, {
+    method: 'POST',
+  })
+}
+
+export function getIndexStatus() {
+  return fetchJson<IndexStatus>(`${BASE}/index/status`)
+}
+
+export function startIndex(sourceId?: string) {
+  const params = sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : ''
+  return fetchJson<{ status: string }>(`${BASE}/index/start${params}`, {
+    method: 'POST',
+  })
+}
+
+export function cancelIndex() {
+  return fetchJson<{ status: string }>(`${BASE}/index/cancel`, { method: 'POST' })
 }
 
 export function getCollections() {

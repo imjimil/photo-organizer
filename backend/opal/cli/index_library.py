@@ -4,12 +4,16 @@ import argparse
 import logging
 from pathlib import Path
 
+from pathlib import Path
+from typing import Callable
+
 from tqdm import tqdm
 
 from opal.chroma_store import ChromaStore
 from opal.config import CLIP_BATCH_SIZE, CHROMA_PATH, IMAGE_FOLDER, MANIFEST_PATH, THUMB_CACHE_PATH, setup_logging
 from opal.embedder import CLIPEmbedder
 from opal.manifest import Manifest, PhotoRecord, path_id
+from opal.sources import DEFAULT_SOURCE_ID
 from opal.ocr_worker import process_ocr_batch
 from opal.organizer import (
     execute_organization,
@@ -42,22 +46,30 @@ def reset_index_data() -> None:
             logger.info("Removed file %s", path)
 
 
-def sync_manifest(manifest: Manifest, chroma: ChromaStore | None = None) -> dict[str, int]:
+def sync_manifest(
+    manifest: Manifest,
+    chroma: ChromaStore | None = None,
+    *,
+    source_id: str | None = None,
+    root: Path | None = None,
+) -> dict[str, int]:
     """Scan filesystem and sync with manifest. Returns scan stats."""
-    scanned = scan_images(IMAGE_FOLDER)
+    sid = source_id or DEFAULT_SOURCE_ID
+    scan_root = (root or IMAGE_FOLDER).resolve()
+    scanned = scan_images(scan_root)
     scanned_paths = {s.rel_path for s in scanned}
     stats = {"scanned": len(scanned), "new_or_changed": 0, "unchanged": 0, "identical": 0}
     stale_ids: list[str] = []
 
-    existing_paths = manifest.get_all_rel_paths()
+    existing_paths = manifest.get_all_rel_paths(source_id=sid)
     missing = existing_paths - scanned_paths
     if missing:
-        removed = manifest.mark_missing(missing)
+        removed = manifest.mark_missing(missing, source_id=sid)
         stats["marked_missing"] = removed
         logger.info("Marked %d files as missing", removed)
 
     for item in scanned:
-        _, needs_reindex, stale_chroma_id, is_identical = manifest.upsert_scanned(item)
+        _, needs_reindex, stale_chroma_id, is_identical = manifest.upsert_scanned(sid, item)
         if stale_chroma_id:
             stale_ids.append(stale_chroma_id)
         if is_identical:
@@ -88,16 +100,20 @@ def run_clip_phase(
     chroma: ChromaStore,
     embedder: CLIPEmbedder,
     records: list[PhotoRecord] | None = None,
+    *,
+    root: Path | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, int]:
     """Batch CLIP embedding and Chroma upsert for pending records."""
     pending = records or manifest.get_pending_clip()
     stats = {"embedded": 0, "failed": 0, "skipped": 0}
+    image_root = (root or IMAGE_FOLDER).resolve()
 
     if not pending:
         logger.info("No files pending CLIP embedding")
         return stats
 
-    paths = [IMAGE_FOLDER / r.rel_path for r in pending]
+    paths = [image_root / r.rel_path for r in pending]
     valid_records: list[PhotoRecord] = []
     valid_paths: list[Path] = []
 
@@ -153,6 +169,8 @@ def run_clip_phase(
 
         chroma.upsert_batch(ids, embeddings, documents, metadatas)
         progress.update(len(batch_records))
+        if progress_callback:
+            progress_callback(min(start + len(batch_records), total), total)
 
     progress.close()
     logger.info("Upserted %d embeddings to Chroma", stats["embedded"])
@@ -218,29 +236,47 @@ def update_chroma_documents(manifest: Manifest, chroma: ChromaStore) -> int:
     return updated
 
 
-def run_ocr_phase(manifest: Manifest) -> dict[str, int]:
+def run_ocr_phase(
+    manifest: Manifest,
+    records: list[PhotoRecord] | None = None,
+    *,
+    root: Path | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict[str, int]:
     """Run OCR on clip_done records."""
-    pending = manifest.get_pending_ocr()
+    pending = records or manifest.get_pending_ocr()
     if not pending:
         logger.info("No files pending OCR")
         return {"processed": 0, "failed": 0, "skipped": 0}
 
     logger.info("Running OCR on %d files", len(pending))
     stats = {"processed": 0, "failed": 0, "skipped": 0}
-    for i in tqdm(range(0, len(pending), 1), desc="OCR", total=len(pending)):
-        batch_stats = process_ocr_batch(manifest, [pending[i]])
+    total = len(pending)
+    for i in tqdm(range(0, total, 1), desc="OCR", total=total):
+        batch_stats = process_ocr_batch(manifest, [pending[i]], image_root=root)
         for key in stats:
             stats[key] += batch_stats[key]
+        if progress_callback:
+            progress_callback(i + 1, total)
     return stats
 
 
-def run_thumbnails(manifest: Manifest) -> int:
-    """Generate thumbnails for all indexed photos."""
-    records = manifest.get_all_indexed()
+def run_thumbnails(
+    manifest: Manifest,
+    *,
+    source_id: str | None = None,
+    root: Path | None = None,
+) -> int:
+    """Generate thumbnails for photos in a source."""
+    image_root = (root or IMAGE_FOLDER).resolve()
+    if source_id:
+        records = manifest.get_pending_thumbnails(source_id)
+    else:
+        records = manifest.get_all_indexed()
     count = 0
     for record in tqdm(records, desc="Thumbnails"):
-        path = IMAGE_FOLDER / record.rel_path
-        if path.exists() and generate_thumbnail(path, path_id(record.rel_path)):
+        path = image_root / record.rel_path
+        if path.exists() and generate_thumbnail(path, record.id):
             count += 1
     return count
 

@@ -232,6 +232,8 @@ def execute_search(plan: SearchPlan, manifest, chroma, embedder, limit: int = 48
     def add(record, kind: MatchKind, similarity: float | None = None) -> None:
         if record.id in seen:
             return
+        if not manifest.record_in_active_library(record):
+            return
         if not _passes_excludes(record, plan):
             return
         if not _passes_folder_includes(record, plan):

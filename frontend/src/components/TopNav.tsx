@@ -15,6 +15,8 @@ interface TopNavProps {
   showSort: boolean
   selectionMode?: boolean
   onEnterSelection?: () => void
+  sourcesLabel?: string | null
+  onOpenSources?: () => void
 }
 
 export function TopNav({
@@ -28,15 +30,27 @@ export function TopNav({
   showSort,
   selectionMode = false,
   onEnterSelection,
+  sourcesLabel = null,
+  onOpenSources,
 }: TopNavProps) {
   return (
     <header className="top-rail hidden md:block">
       <div className="top-rail-inner mx-auto max-w-[1680px] px-8 py-4">
         <div className="top-rail-brand flex min-w-0 items-center gap-8">
           <h1 className="type-brand text-text-primary">Opal</h1>
-          <span className="type-meta">
-            {total.toLocaleString()} saved
-          </span>
+          <div className="flex min-w-0 max-w-xs flex-col gap-0.5">
+            <span className="type-meta">{total.toLocaleString()} saved</span>
+            {sourcesLabel && onOpenSources && (
+              <button
+                type="button"
+                className="nav-sources-label"
+                onClick={onOpenSources}
+                title="Manage library folders"
+              >
+                {sourcesLabel}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="top-rail-center">
@@ -44,6 +58,11 @@ export function TopNav({
         </div>
 
         <div className="top-rail-actions">
+          {onOpenSources && (
+            <button type="button" className="library-select-btn" onClick={onOpenSources}>
+              Folders
+            </button>
+          )}
           {onEnterSelection && !selectionMode && (
             <button type="button" className="library-select-btn" onClick={onEnterSelection}>
               Select
@@ -93,6 +112,8 @@ export function MobileHeader({
   sort,
   onSortChange,
   showSort = false,
+  sourcesLabel = null,
+  onOpenSources,
 }: {
   view: AppView
   total: number
@@ -104,6 +125,8 @@ export function MobileHeader({
   sort?: 'date' | 'random'
   onSortChange?: (sort: 'date' | 'random') => void
   showSort?: boolean
+  sourcesLabel?: string | null
+  onOpenSources?: () => void
 }) {
   const title = drillIn
     ? drillIn.title
@@ -133,9 +156,24 @@ export function MobileHeader({
               {title}
             </h1>
             {countLabel && <p className="type-meta mt-1">{countLabel}</p>}
+            {!drillIn && sourcesLabel && onOpenSources && (
+              <button
+                type="button"
+                className="nav-sources-label mt-0.5 max-w-[12rem] truncate text-left"
+                onClick={onOpenSources}
+                title="Manage library folders"
+              >
+                {sourcesLabel}
+              </button>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {onOpenSources && !drillIn && (
+            <button type="button" className="library-select-btn" onClick={onOpenSources}>
+              Folders
+            </button>
+          )}
           {showSort && onSortChange && sort && !drillIn && view === 'library' && (
             <div className="mobile-sort-toggle" role="group" aria-label="Sort library">
               <button

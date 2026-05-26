@@ -4,12 +4,14 @@ import {
   getAlbums,
   getCollections,
   getStats,
+  isDesktopShell,
   reorderAlbums,
   search,
   type AlbumSummary,
   type CollectionSummary,
   type SearchPlanSummary,
   type SearchResult,
+  type SourceSummary,
 } from './api/client'
 import { AlbumPicker } from './components/AlbumPicker'
 import { NewAlbumSheet } from './components/NewAlbumSheet'
@@ -18,7 +20,9 @@ import { BottomNav } from './components/BottomNav'
 import { CollectionDetailHeader } from './components/CollectionDetailHeader'
 import { CollectionsView } from './components/CollectionsView'
 import { ContextHint } from './components/ContextHint'
-import { LibraryEmpty } from './components/LibraryEmpty'
+import { OnboardingView } from './components/OnboardingView'
+import { IndexProgressBanner } from './components/IndexProgressBanner'
+import { SourcesSettings } from './components/SourcesSettings'
 import { DiscoverView } from './components/DiscoverView'
 import { Lightbox } from './components/Lightbox'
 import { PhotoGrid } from './components/PhotoGrid'
@@ -35,6 +39,10 @@ import { useDismissibleHint } from './hooks/useDismissibleHint'
 import { useTheme } from './hooks/useTheme'
 import { useToast } from './hooks/useToast'
 import { useSearchHistory } from './hooks/useSearchHistory'
+import { useIndexJob } from './hooks/useIndexJob'
+import { useSources } from './hooks/useSources'
+import { formatSourcesLabel } from './utils/sourcesLabel'
+import { LibraryEmpty } from './components/LibraryEmpty'
 import {
   apiSearchQuery,
   chipsAreActive,
@@ -43,7 +51,10 @@ import {
   type SearchChipState,
 } from './search/plan'
 
+const ONBOARDING_SKIP_KEY = 'opal-onboarding-skipped'
+
 export default function App() {
+  const desktop = isDesktopShell()
   const { toast } = useToast()
   const { mode: themeMode, cycle: cycleTheme } = useTheme()
   const selectHint = useDismissibleHint('opal-hint-select')
@@ -71,6 +82,32 @@ export default function App() {
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkAlbumOpen, setBulkAlbumOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [onboardingDone, setOnboardingDone] = useState(false)
+  const [onboardingSkipped, setOnboardingSkipped] = useState(
+    () => localStorage.getItem(ONBOARDING_SKIP_KEY) === '1',
+  )
+
+  const {
+    sources,
+    activeSources,
+    loading: sourcesLoading,
+    pickAndAdd,
+    remove: removeSource,
+    rescan,
+    refresh: refreshSources,
+    hasSources,
+  } = useSources()
+  const sourcesLabel = formatSourcesLabel(activeSources)
+  const openSources = useCallback(() => setSettingsOpen(true), [])
+  const { status: indexStatus, searchPartial } = useIndexJob()
+
+  const showOnboarding =
+    desktop &&
+    !sourcesLoading &&
+    !hasSources &&
+    !onboardingSkipped &&
+    !onboardingDone
 
   const inCollectionDetail = collectionScope.kind !== 'grid'
 
@@ -79,7 +116,9 @@ export default function App() {
       ? { album: collectionScope.id }
       : collectionScope.kind === 'folder'
         ? { folder: collectionScope.id }
-        : {}
+        : collectionScope.kind === 'source'
+          ? { source_id: collectionScope.id }
+          : {}
 
   const {
     items: libraryItems,
@@ -90,6 +129,13 @@ export default function App() {
     total: libraryTotal,
     reload: reloadLibrary,
   } = useBrowseFeed(feedSort, {})
+
+  useEffect(() => {
+    if (indexStatus.browse_ready > 0) {
+      reloadLibrary()
+      getStats().then((s) => setStatsTotal(s.browse_ready)).catch(() => {})
+    }
+  }, [indexStatus.browse_ready, reloadLibrary])
 
   const {
     items: collectionItems,
@@ -280,6 +326,11 @@ export default function App() {
     setView('collections')
   }
 
+  const handleOpenLibrary = (library: SourceSummary) => {
+    setCollectionScope({ kind: 'source', id: library.id, name: library.name })
+    setView('collections')
+  }
+
   const handleCreateAlbum = async (e: React.FormEvent) => {
     e.preventDefault()
     const name = newAlbumName.trim()
@@ -301,7 +352,10 @@ export default function App() {
       ? albums.find((a) => a.id === collectionScope.id)?.count ?? collectionTotal
       : collectionScope.kind === 'folder'
         ? collections.find((c) => c.id === collectionScope.id)?.count ?? collectionTotal
-        : collectionTotal
+        : collectionScope.kind === 'source'
+          ? activeSources.find((s) => s.id === collectionScope.id)?.browse_count ??
+            collectionTotal
+          : collectionTotal
 
   const mobileHeaderTotal =
     view === 'collections' && inCollectionDetail
@@ -322,8 +376,10 @@ export default function App() {
 
   const emptyCollectionMessage =
     collectionScope.kind === 'folder'
-      ? 'This folder has no indexed photos yet.'
-      : 'This album is empty. Select photos from your library and add them here.'
+      ? 'This subfolder has no indexed photos yet.'
+      : collectionScope.kind === 'source'
+        ? 'This library has no indexed photos yet.'
+        : 'This album is empty. Select photos from your library and add them here.'
 
   const searchPending = view === 'search' && query.trim() !== debouncedQuery.trim()
   const searchActive =
@@ -364,6 +420,42 @@ export default function App() {
     selectionMode && (view === 'library' || (view === 'collections' && inCollectionDetail))
   const hideBottomNav = showGridSelection
 
+  const handleAddFolder = async () => {
+    try {
+      const source = await pickAndAdd()
+      if (source) {
+        toast(`Added ${source.name}`, 'success')
+        reloadLibrary()
+        refreshSources()
+        return true
+      }
+      return false
+    } catch {
+      toast('Could not add folder', 'error')
+      return false
+    }
+  }
+
+  const handleSkipOnboarding = () => {
+    localStorage.setItem(ONBOARDING_SKIP_KEY, '1')
+    setOnboardingSkipped(true)
+  }
+
+  if (showOnboarding) {
+    return (
+      <OnboardingView
+        indexStatus={indexStatus}
+        onAddFolder={handleAddFolder}
+        onSkip={handleSkipOnboarding}
+        onDone={() => {
+          setOnboardingDone(true)
+          reloadLibrary()
+          refreshSources()
+        }}
+      />
+    )
+  }
+
   return (
     <div className="app-shell min-h-dvh bg-bg-base text-text-primary">
       <a href="#main-content" className="skip-link">
@@ -390,6 +482,8 @@ export default function App() {
               ? enterSelectionMode
               : undefined
           }
+          sourcesLabel={sourcesLabel}
+          onOpenSources={openSources}
         />
         <MobileHeader
           view={view}
@@ -406,7 +500,16 @@ export default function App() {
           sort={feedSort}
           onSortChange={setFeedSort}
           showSort={view === 'library'}
+          sourcesLabel={sourcesLabel}
+          onOpenSources={openSources}
         />
+
+        {desktop && (
+          <IndexProgressBanner
+            status={indexStatus}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
 
         {view === 'library' && (
           <div key="library" className="view-enter flex flex-1 flex-col">
@@ -441,6 +544,10 @@ export default function App() {
               {showLibraryEmpty ? (
                 <LibraryEmpty
                   indexed={libraryIndexed}
+                  desktop={desktop}
+                  onAddFolder={() => {
+                    void handleAddFolder()
+                  }}
                   onTryDiscover={() => setView('discover')}
                 />
               ) : (
@@ -504,8 +611,10 @@ export default function App() {
               {!inCollectionDetail ? (
                 <CollectionsView
                   albums={albums}
+                  libraries={activeSources}
                   folders={collections}
                   onOpenAlbum={handleOpenAlbum}
+                  onOpenLibrary={handleOpenLibrary}
                   onOpenFolder={handleOpenFolder}
                   onNewAlbum={() => setNewAlbumOpen(true)}
                   onManageAlbum={setManagingAlbum}
@@ -577,6 +686,7 @@ export default function App() {
                 setChips(chipsFromPlan(entry.plan))
               }}
               onClearHistory={clearSearchHistory}
+              searchPartial={searchPartial}
             />
             <main id="main-content" className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 pt-1 md:px-6">
               {!searching && !searchPending && searchResults.length === 0 && searchActive && (
@@ -602,6 +712,19 @@ export default function App() {
 
         <BottomNav view={view} onViewChange={handleViewChange} hidden={hideBottomNav} />
       </div>
+
+      {settingsOpen && (
+        <SourcesSettings
+          sources={sources}
+          indexStatus={indexStatus}
+          onAddFolder={async () => {
+            await handleAddFolder()
+          }}
+          onRemove={removeSource}
+          onRescan={rescan}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       {newAlbumOpen && (
         <NewAlbumSheet

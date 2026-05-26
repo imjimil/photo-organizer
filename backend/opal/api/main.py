@@ -23,16 +23,20 @@ from opal.api.schemas import (
     FavoriteStatusResponse,
     ImageDetail,
     ImageSummary,
+    IndexStatusResponse,
     SearchHistoryResponse,
     SearchPlanSummary,
     SearchResponse,
     SearchResult,
     SimilarResponse,
+    SourceCreateRequest,
     SourceSummary,
+    SourceUpdateRequest,
     SourcesResponse,
     StatsResponse,
 )
 from opal.config import IMAGE_FOLDER, setup_logging
+from opal.index_service import get_index_service
 from opal.manifest import path_id
 from opal.search import MatchLevel, execute_search, merge_plan, parse_search
 from opal.thumbnails import get_display_image
@@ -68,6 +72,12 @@ def _resolve_record_by_path_id(path_id_str: str):
     return get_manifest().get_by_path_id(path_id_str)
 
 
+def _record_root(record):
+    manifest = get_manifest()
+    root = manifest.get_source_root(record.source_id)
+    return root or IMAGE_FOLDER
+
+
 def _album_to_summary(album) -> AlbumSummary:
     thumb = None
     if album.cover_photo_id:
@@ -99,19 +109,111 @@ def collections(limit: int = Query(24, ge=1, le=100)):
 
 
 @app.get("/api/sources", response_model=SourcesResponse)
-def sources():
+def sources(include_removed: bool = Query(False)):
     manifest = get_manifest()
-    count = manifest.browse_count()
-    return SourcesResponse(
-        sources=[
+    index = get_index_service()
+    job = index.status(manifest)
+    rows = manifest.list_sources(include_removed=include_removed)
+    items: list[SourceSummary] = []
+    for source in rows:
+        phase = job["phase"] if job.get("source_id") == source.id and job.get("running") else None
+        items.append(
             SourceSummary(
-                id="default",
-                name="Library",
-                count=count,
-                active=True,
+                id=source.id,
+                name=source.name,
+                path=source.path,
+                count=manifest.source_photo_count(source.id),
+                browse_count=manifest.source_photo_count(source.id, browse_ready_only=True),
+                active=source.enabled and source.removed_at is None,
+                enabled=source.enabled,
+                removed=source.removed_at is not None,
+                last_scan_at=source.last_scan_at,
+                indexing_phase=phase,
             )
-        ]
+        )
+    return SourcesResponse(sources=items)
+
+
+@app.post("/api/sources", response_model=SourceSummary)
+def create_source(body: SourceCreateRequest):
+    manifest = get_manifest()
+    try:
+        source = manifest.add_or_restore_source(body.path, body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    get_index_service().start(get_manifest(), get_chroma(), source.id)
+    return SourceSummary(
+        id=source.id,
+        name=source.name,
+        path=source.path,
+        count=0,
+        browse_count=0,
+        active=True,
+        enabled=True,
+        removed=False,
+        last_scan_at=source.last_scan_at,
     )
+
+
+@app.patch("/api/sources/{source_id}", response_model=SourceSummary)
+def update_source(source_id: str, body: SourceUpdateRequest):
+    manifest = get_manifest()
+    updated = manifest.update_source(
+        source_id, name=body.name, enabled=body.enabled
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return SourceSummary(
+        id=updated.id,
+        name=updated.name,
+        path=updated.path,
+        count=manifest.source_photo_count(updated.id),
+        browse_count=manifest.source_photo_count(updated.id, browse_ready_only=True),
+        active=updated.enabled and updated.removed_at is None,
+        enabled=updated.enabled,
+        removed=updated.removed_at is not None,
+        last_scan_at=updated.last_scan_at,
+    )
+
+
+@app.delete("/api/sources/{source_id}")
+def delete_source(source_id: str):
+    manifest = get_manifest()
+    if not manifest.soft_remove_source(source_id):
+        raise HTTPException(status_code=404, detail="Source not found")
+    return {"status": "ok"}
+
+
+@app.post("/api/sources/{source_id}/scan")
+def scan_source(source_id: str):
+    manifest = get_manifest()
+    source = manifest.get_source(source_id)
+    if not source or not source.enabled:
+        raise HTTPException(status_code=404, detail="Source not found")
+    started = get_index_service().start(get_manifest(), get_chroma(), source_id)
+    if not started:
+        raise HTTPException(status_code=409, detail="Index job already running")
+    return {"status": "started"}
+
+
+@app.get("/api/index/status", response_model=IndexStatusResponse)
+def index_status():
+    manifest = get_manifest()
+    return IndexStatusResponse(**get_index_service().status(manifest))
+
+
+@app.post("/api/index/start")
+def index_start(source_id: str | None = Query(None)):
+    started = get_index_service().start(get_manifest(), get_chroma(), source_id)
+    if not started:
+        raise HTTPException(status_code=409, detail="Index job already running")
+    return {"status": "started"}
+
+
+@app.post("/api/index/cancel")
+def index_cancel():
+    get_index_service().cancel()
+    return {"status": "ok"}
 
 
 @app.get("/api/stats", response_model=StatsResponse)
@@ -132,6 +234,7 @@ def browse(
     limit: int = Query(40, ge=1, le=100),
     sort: str = Query("date", pattern="^(date|random)$"),
     folder: str | None = None,
+    source_id: str | None = None,
     album: str | None = None,
 ):
     manifest = get_manifest()
@@ -144,9 +247,15 @@ def browse(
             album_id=album, offset=offset, limit=limit, sort=sort
         )
     else:
-        total = manifest.browse_count(folder=folder or None)
+        total = manifest.browse_count(
+            folder=folder or None, source_id=source_id or None
+        )
         records = manifest.browse(
-            offset=offset, limit=limit, sort=sort, folder=folder or None
+            offset=offset,
+            limit=limit,
+            sort=sort,
+            folder=folder or None,
+            source_id=source_id or None,
         )
     items = [ImageSummary(**record_to_summary(r)) for r in records]
     return BrowseResponse(
@@ -353,7 +462,8 @@ def image_detail(image_id: str):
     record = _resolve_record_by_path_id(image_id)
     if not record:
         raise HTTPException(status_code=404, detail="Image not found")
-    pid = path_id(record.rel_path)
+    pid = record.id
+    manifest = get_manifest()
     return ImageDetail(
         id=pid,
         content_hash=record.content_hash,
@@ -364,7 +474,7 @@ def image_detail(image_id: str):
         status=record.status,
         thumb_url=f"/api/thumbs/{pid}",
         media_url=f"/api/media/{pid}",
-        absolute_path=str((IMAGE_FOLDER / record.rel_path).resolve()),
+        absolute_path=manifest.resolve_absolute_path(record),
     )
 
 
@@ -395,7 +505,7 @@ def similar(image_id: str, limit: int = Query(12, ge=1, le=40)):
         if cid == record.content_hash:
             continue
         rec = manifest.get_by_id(cid)
-        if not rec:
+        if not rec or not manifest.record_in_active_library(rec):
             continue
         summary = record_to_summary(rec)
         results.append(
@@ -412,7 +522,8 @@ def serve_thumb(image_id: str):
     record = _resolve_record_by_path_id(image_id)
     if not record:
         raise HTTPException(status_code=404, detail="Image not found")
-    path = get_display_image(image_id, record.rel_path, IMAGE_FOLDER)
+    root = _record_root(record)
+    path = get_display_image(image_id, record.rel_path, root)
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
     media = "image/webp" if path.suffix.lower() == ".webp" else "image/jpeg"
@@ -424,7 +535,7 @@ def export_image(image_id: str):
     record = _resolve_record_by_path_id(image_id)
     if not record:
         raise HTTPException(status_code=404, detail="Image not found")
-    full = IMAGE_FOLDER / record.rel_path
+    full = _record_root(record) / record.rel_path
     if not full.exists():
         raise HTTPException(status_code=404, detail="File missing on disk")
     return FileResponse(
@@ -439,7 +550,7 @@ def serve_media(image_id: str):
     record = _resolve_record_by_path_id(image_id)
     if not record:
         raise HTTPException(status_code=404, detail="Image not found")
-    full = IMAGE_FOLDER / record.rel_path
+    full = _record_root(record) / record.rel_path
     if not full.exists():
         raise HTTPException(status_code=404, detail="File missing on disk")
     return FileResponse(full)

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -13,6 +14,14 @@ from typing import Iterator, Literal
 
 from opal.config import CLIP_MODEL, IMAGE_FOLDER, MANIFEST_PATH, ensure_dirs
 from opal.scanner import ScannedFile, with_content_hash
+from opal.sources import (
+    DEFAULT_SOURCE_ID,
+    SourceRecord,
+    default_source_name,
+    new_source_id,
+    normalize_source_path,
+    now_iso,
+)
 
 logger = logging.getLogger("photo_organizer.manifest")
 
@@ -28,8 +37,11 @@ FAVORITES_ALBUM_NAME = "Favorites"
 RESERVED_ALBUM_NAMES = frozenset({FAVORITES_ALBUM_NAME.casefold()})
 
 
-def path_id(rel_path: str) -> str:
-    """Stable manifest id per file path."""
+def path_id(rel_path: str, source_id: str | None = None) -> str:
+    """Stable manifest id per file path (scoped by source when provided)."""
+    if source_id:
+        payload = f"{source_id}:{rel_path}"
+        return hashlib.sha256(payload.encode()).hexdigest()
     return hashlib.sha256(rel_path.encode()).hexdigest()
 
 
@@ -47,6 +59,7 @@ class AlbumRecord:
 @dataclass
 class PhotoRecord:
     id: str
+    source_id: str
     rel_path: str
     file_size: int
     mtime: float
@@ -109,6 +122,7 @@ class Manifest:
             conn.executescript(SCHEMA)
             self._migrate_albums(conn)
             self._migrate_search_history(conn)
+            self._migrate_sources(conn)
 
     def _migrate_search_history(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -121,6 +135,223 @@ class Manifest:
             )
             """
         )
+
+    def _migrate_sources(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sources (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                last_scan_at TEXT,
+                removed_at TEXT
+            )
+            """
+        )
+        photo_cols = {row[1] for row in conn.execute("PRAGMA table_info(photos)")}
+        if "source_id" not in photo_cols:
+            conn.execute(
+                f"ALTER TABLE photos ADD COLUMN source_id TEXT NOT NULL DEFAULT '{DEFAULT_SOURCE_ID}'"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_source_rel "
+                "ON photos(source_id, rel_path)"
+            )
+        self._ensure_default_source(conn)
+
+    def _ensure_default_source(self, conn: sqlite3.Connection) -> None:
+        photo_count = conn.execute("SELECT COUNT(*) AS cnt FROM photos").fetchone()["cnt"]
+        if photo_count == 0 and os.getenv("OPAL_DESKTOP") == "1":
+            return
+        path = normalize_source_path(IMAGE_FOLDER)
+        now = now_iso()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO sources
+              (id, name, path, enabled, created_at, last_scan_at, removed_at)
+            VALUES (?, ?, ?, 1, ?, NULL, NULL)
+            """,
+            (DEFAULT_SOURCE_ID, default_source_name(path), path, now),
+        )
+        conn.execute(
+            "UPDATE photos SET source_id = ? WHERE source_id IS NULL OR source_id = ''",
+            (DEFAULT_SOURCE_ID,),
+        )
+
+    def _source_from_row(self, row: sqlite3.Row) -> SourceRecord:
+        return SourceRecord(
+            id=row["id"],
+            name=row["name"],
+            path=row["path"],
+            enabled=bool(row["enabled"]),
+            created_at=row["created_at"],
+            last_scan_at=row["last_scan_at"],
+            removed_at=row["removed_at"],
+        )
+
+    def list_sources(
+        self,
+        *,
+        include_removed: bool = False,
+        enabled_only: bool = False,
+    ) -> list[SourceRecord]:
+        clauses = ["1=1"]
+        if not include_removed:
+            clauses.append("removed_at IS NULL")
+        if enabled_only:
+            clauses.append("enabled = 1")
+        where = " AND ".join(clauses)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM sources WHERE {where} ORDER BY created_at ASC"
+            ).fetchall()
+        return [self._source_from_row(r) for r in rows]
+
+    def get_source(self, source_id: str) -> SourceRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM sources WHERE id = ?", (source_id,)
+            ).fetchone()
+        return self._source_from_row(row) if row else None
+
+    def get_source_by_path(self, path: str) -> SourceRecord | None:
+        normalized = normalize_source_path(path)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM sources WHERE path = ?", (normalized,)
+            ).fetchone()
+        return self._source_from_row(row) if row else None
+
+    def get_source_root(self, source_id: str) -> Path | None:
+        source = self.get_source(source_id)
+        if not source:
+            return None
+        return source.root
+
+    def resolve_absolute_path(self, record: PhotoRecord) -> str | None:
+        root = self.get_source_root(record.source_id)
+        if root is None:
+            return str((IMAGE_FOLDER / record.rel_path).resolve())
+        return str((root / record.rel_path).resolve())
+
+    def source_photo_count(self, source_id: str, *, browse_ready_only: bool = False) -> int:
+        where = "source_id = ?"
+        params: list = [source_id]
+        if browse_ready_only:
+            where += (
+                " AND status IN ('indexed', 'ocr_done', 'clip_done', 'pending') "
+                "AND duplicate_of IS NULL"
+            )
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS cnt FROM photos WHERE {where}", params
+            ).fetchone()
+        return row["cnt"] if row else 0
+
+    def add_or_restore_source(self, path: str, name: str | None = None) -> SourceRecord:
+        normalized = normalize_source_path(path)
+        if not Path(normalized).is_dir():
+            raise ValueError(f"Folder not found: {normalized}")
+        existing = self.get_source_by_path(normalized)
+        now = now_iso()
+        if existing:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE sources
+                    SET enabled = 1, removed_at = NULL, name = COALESCE(?, name)
+                    WHERE id = ?
+                    """,
+                    (name, existing.id),
+                )
+            restored = self.get_source(existing.id)
+            assert restored is not None
+            return restored
+
+        source_id = new_source_id()
+        label = (name or default_source_name(normalized)).strip() or default_source_name(
+            normalized
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sources
+                  (id, name, path, enabled, created_at, last_scan_at, removed_at)
+                VALUES (?, ?, ?, 1, ?, NULL, NULL)
+                """,
+                (source_id, label, normalized, now),
+            )
+        created = self.get_source(source_id)
+        assert created is not None
+        return created
+
+    def soft_remove_source(self, source_id: str) -> bool:
+        now = now_iso()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE sources
+                SET enabled = 0, removed_at = ?
+                WHERE id = ? AND id != ?
+                """,
+                (now, source_id, DEFAULT_SOURCE_ID),
+            )
+            if cur.rowcount == 0:
+                cur = conn.execute(
+                    """
+                    UPDATE sources
+                    SET enabled = 0, removed_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, source_id),
+                )
+            return cur.rowcount > 0
+
+    def update_source(
+        self,
+        source_id: str,
+        *,
+        name: str | None = None,
+        enabled: bool | None = None,
+    ) -> SourceRecord | None:
+        fields: list[str] = []
+        params: list = []
+        if name is not None:
+            trimmed = name.strip()
+            if trimmed:
+                fields.append("name = ?")
+                params.append(trimmed)
+        if enabled is not None:
+            fields.append("enabled = ?")
+            params.append(1 if enabled else 0)
+            if enabled:
+                fields.append("removed_at = NULL")
+        if not fields:
+            return self.get_source(source_id)
+        params.append(source_id)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE sources SET {', '.join(fields)} WHERE id = ?",
+                params,
+            )
+        return self.get_source(source_id)
+
+    def touch_source_scan(self, source_id: str) -> None:
+        now = now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE sources SET last_scan_at = ? WHERE id = ?",
+                (now, source_id),
+            )
+
+    def has_enabled_sources(self) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM sources WHERE enabled = 1 AND removed_at IS NULL"
+            ).fetchone()
+        return bool(row and row["cnt"] > 0)
 
     def _migrate_albums(self, conn: sqlite3.Connection) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(albums)")}
@@ -179,8 +410,10 @@ class Manifest:
             conn.close()
 
     def _row_to_record(self, row: sqlite3.Row) -> PhotoRecord:
+        source_id = row["source_id"] if "source_id" in row.keys() else DEFAULT_SOURCE_ID
         return PhotoRecord(
             id=row["id"],
+            source_id=source_id,
             rel_path=row["rel_path"],
             file_size=row["file_size"],
             mtime=row["mtime"],
@@ -229,18 +462,57 @@ class Manifest:
         """True if the record still exists on disk and is not marked missing."""
         if record.status == STATUS_MISSING:
             return False
-        return (IMAGE_FOLDER / record.rel_path).exists()
+        root = self.get_source_root(record.source_id)
+        if root is None:
+            return (IMAGE_FOLDER / record.rel_path).exists()
+        return (root / record.rel_path).exists()
 
-    def get_all_rel_paths(self) -> set[str]:
-        with self._connect() as conn:
-            rows = conn.execute("SELECT rel_path FROM photos").fetchall()
-        return {row["rel_path"] for row in rows}
+    def _enabled_source_clause(self, alias: str = "") -> tuple[str, list]:
+        prefix = f"{alias}." if alias else ""
+        return (
+            f"{prefix}source_id IN ("
+            "SELECT id FROM sources WHERE enabled = 1 AND removed_at IS NULL"
+            ")",
+            [],
+        )
 
-    def get_by_rel_path(self, rel_path: str) -> PhotoRecord | None:
+    def is_source_active(self, source_id: str) -> bool:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM photos WHERE rel_path = ?", (rel_path,)
+                """
+                SELECT 1 FROM sources
+                WHERE id = ? AND enabled = 1 AND removed_at IS NULL
+                """,
+                (source_id,),
             ).fetchone()
+        return row is not None
+
+    def record_in_active_library(self, record: PhotoRecord) -> bool:
+        return self.is_source_active(record.source_id)
+
+    def get_all_rel_paths(self, source_id: str | None = None) -> set[str]:
+        with self._connect() as conn:
+            if source_id:
+                rows = conn.execute(
+                    "SELECT rel_path FROM photos WHERE source_id = ?", (source_id,)
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT rel_path FROM photos").fetchall()
+        return {row["rel_path"] for row in rows}
+
+    def get_by_rel_path(
+        self, rel_path: str, source_id: str | None = None
+    ) -> PhotoRecord | None:
+        with self._connect() as conn:
+            if source_id:
+                row = conn.execute(
+                    "SELECT * FROM photos WHERE rel_path = ? AND source_id = ?",
+                    (rel_path, source_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM photos WHERE rel_path = ?", (rel_path,)
+                ).fetchone()
         return self._row_to_record(row) if row else None
 
     def get_by_status(self, status: str) -> list[PhotoRecord]:
@@ -265,13 +537,20 @@ class Manifest:
         limit: int = 40,
         sort: str = "date",
         folder: str | None = None,
+        source_id: str | None = None,
     ) -> list[PhotoRecord]:
         """Paginated feed of gallery-ready canonical images."""
         order = "mtime DESC" if sort == "date" else "RANDOM()"
         where = (
-            "status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL"
+            "status IN ('indexed', 'ocr_done', 'clip_done', 'pending') "
+            "AND duplicate_of IS NULL"
         )
-        params: list = []
+        src_clause, src_params = self._enabled_source_clause()
+        where += f" AND {src_clause}"
+        params: list = list(src_params)
+        if source_id:
+            where += " AND source_id = ?"
+            params.append(source_id)
         if folder:
             where += " AND (rel_path LIKE ? OR rel_path = ?)"
             params.extend([f"{folder}/%", folder])
@@ -287,11 +566,21 @@ class Manifest:
             ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
-    def browse_count(self, folder: str | None = None) -> int:
+    def browse_count(
+        self,
+        folder: str | None = None,
+        source_id: str | None = None,
+    ) -> int:
         where = (
-            "status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL"
+            "status IN ('indexed', 'ocr_done', 'clip_done', 'pending') "
+            "AND duplicate_of IS NULL"
         )
-        params: list = []
+        src_clause, src_params = self._enabled_source_clause()
+        where += f" AND {src_clause}"
+        params: list = list(src_params)
+        if source_id:
+            where += " AND source_id = ?"
+            params.append(source_id)
         if folder:
             where += " AND (rel_path LIKE ? OR rel_path = ?)"
             params.extend([f"{folder}/%", folder])
@@ -304,9 +593,10 @@ class Manifest:
 
     def list_collections(self, limit: int = 24) -> list[tuple[str, int]]:
         """Top-level folder names with image counts."""
+        src_clause, src_params = self._enabled_source_clause()
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                   CASE
                     WHEN instr(rel_path, '/') > 0
@@ -315,13 +605,14 @@ class Manifest:
                   END AS collection,
                   COUNT(*) AS cnt
                 FROM photos
-                WHERE status IN ('indexed', 'ocr_done', 'clip_done')
+                WHERE status IN ('indexed', 'ocr_done', 'clip_done', 'pending')
                   AND duplicate_of IS NULL
+                  AND {src_clause}
                 GROUP BY collection
                 ORDER BY cnt DESC, collection ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (*src_params, limit),
             ).fetchall()
         return [(r["collection"], r["cnt"]) for r in rows]
 
@@ -593,9 +884,12 @@ class Manifest:
         exclude: list[str] | None = None,
     ) -> list[PhotoRecord]:
         where = (
-            "status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL"
+            "status IN ('indexed', 'ocr_done', 'clip_done', 'pending') "
+            "AND duplicate_of IS NULL"
         )
-        params: list = []
+        src_clause, src_params = self._enabled_source_clause()
+        where += f" AND {src_clause}"
+        params: list = list(src_params)
         if exclude:
             placeholders = ",".join("?" for _ in exclude)
             where += f" AND id NOT IN ({placeholders})"
@@ -621,13 +915,13 @@ class Manifest:
         return self._row_to_record(row) if row else None
 
     def upsert_scanned(
-        self, scanned: ScannedFile
+        self, source_id: str, scanned: ScannedFile
     ) -> tuple[PhotoRecord, bool, str | None, bool]:
         """Returns (record, needs_reindex, stale_chroma_id, is_identical_duplicate)."""
-        existing = self.get_by_rel_path(scanned.rel_path)
+        existing = self.get_by_rel_path(scanned.rel_path, source_id=source_id)
         needs_reindex = False
         stale_chroma_id: str | None = None
-        file_id = path_id(scanned.rel_path)
+        file_id = path_id(scanned.rel_path, source_id)
 
         if existing is None:
             scanned = with_content_hash(scanned)
@@ -636,6 +930,7 @@ class Manifest:
             if canonical:
                 record = PhotoRecord(
                     id=file_id,
+                    source_id=source_id,
                     rel_path=scanned.rel_path,
                     file_size=scanned.file_size,
                     mtime=scanned.mtime,
@@ -659,6 +954,7 @@ class Manifest:
 
             record = PhotoRecord(
                 id=file_id,
+                source_id=source_id,
                 rel_path=scanned.rel_path,
                 file_size=scanned.file_size,
                 mtime=scanned.mtime,
@@ -682,7 +978,7 @@ class Manifest:
                 needs_reindex = True
                 stale_chroma_id = existing.content_hash
                 self._update_changed(file_id, scanned)
-                existing = self.get_by_rel_path(scanned.rel_path)
+                existing = self.get_by_rel_path(scanned.rel_path, source_id=source_id)
                 assert existing is not None
                 return existing, needs_reindex, stale_chroma_id, False
             self._update_stats(file_id, scanned.file_size, scanned.mtime)
@@ -694,13 +990,14 @@ class Manifest:
             conn.execute(
                 """
                 INSERT INTO photos (
-                    id, rel_path, file_size, mtime, content_hash,
+                    id, source_id, rel_path, file_size, mtime, content_hash,
                     ocr_text, has_text, clip_model, indexed_at, status,
                     error_msg, duplicate_of, exif_date
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
+                    record.source_id,
                     record.rel_path,
                     record.file_size,
                     record.mtime,
@@ -821,39 +1118,75 @@ class Manifest:
                 (duplicate_of, photo_id),
             )
 
-    def mark_missing(self, rel_paths: set[str]) -> int:
+    def mark_missing(self, rel_paths: set[str], source_id: str | None = None) -> int:
         if not rel_paths:
             return 0
         placeholders = ",".join("?" * len(rel_paths))
+        params: list = [STATUS_MISSING, *rel_paths, STATUS_MISSING]
+        query = (
+            f"UPDATE photos SET status = ? WHERE rel_path IN ({placeholders}) "
+            f"AND status != ?"
+        )
+        if source_id:
+            query += " AND source_id = ?"
+            params.append(source_id)
         with self._connect() as conn:
-            cursor = conn.execute(
-                f"UPDATE photos SET status = ? WHERE rel_path IN ({placeholders}) "
-                f"AND status != ?",
-                [STATUS_MISSING, *rel_paths, STATUS_MISSING],
-            )
+            cursor = conn.execute(query, params)
             return cursor.rowcount
 
-    def get_pending_clip(self) -> list[PhotoRecord]:
+    def get_pending_clip(self, source_id: str | None = None) -> list[PhotoRecord]:
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM photos
-                WHERE status IN (?, ?) AND duplicate_of IS NULL
-                ORDER BY rel_path
-                """,
-                (STATUS_PENDING, STATUS_FAILED),
-            ).fetchall()
+            if source_id:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM photos
+                    WHERE status IN (?, ?) AND duplicate_of IS NULL AND source_id = ?
+                    ORDER BY rel_path
+                    """,
+                    (STATUS_PENDING, STATUS_FAILED, source_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM photos
+                    WHERE status IN (?, ?) AND duplicate_of IS NULL
+                    ORDER BY rel_path
+                    """,
+                    (STATUS_PENDING, STATUS_FAILED),
+                ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
-    def get_pending_ocr(self) -> list[PhotoRecord]:
+    def get_pending_ocr(self, source_id: str | None = None) -> list[PhotoRecord]:
+        with self._connect() as conn:
+            if source_id:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM photos
+                    WHERE status = ? AND duplicate_of IS NULL AND source_id = ?
+                    ORDER BY rel_path
+                    """,
+                    (STATUS_CLIP_DONE, source_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM photos
+                    WHERE status = ? AND duplicate_of IS NULL
+                    ORDER BY rel_path
+                    """,
+                    (STATUS_CLIP_DONE,),
+                ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def get_pending_thumbnails(self, source_id: str) -> list[PhotoRecord]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM photos
-                WHERE status = ? AND duplicate_of IS NULL
+                WHERE source_id = ? AND status != ? AND duplicate_of IS NULL
                 ORDER BY rel_path
                 """,
-                (STATUS_CLIP_DONE,),
+                (source_id, STATUS_MISSING),
             ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
@@ -877,9 +1210,10 @@ class Manifest:
         return {row["id"]: row["ocr_text"] for row in rows}
 
     def _indexed_where(self) -> tuple[str, list]:
+        src_clause, src_params = self._enabled_source_clause()
         return (
-            "status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL",
-            [],
+            f"status IN ('indexed', 'ocr_done', 'clip_done') AND duplicate_of IS NULL AND {src_clause}",
+            list(src_params),
         )
 
     def _photo_date_sql(self) -> str:

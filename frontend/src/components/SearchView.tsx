@@ -23,6 +23,7 @@ interface SearchViewProps {
   history: LocalSearchHistoryEntry[]
   onPickHistory: (entry: LocalSearchHistoryEntry) => void
   onClearHistory: () => void
+  searchPartial?: boolean
 }
 
 const MATCH_OPTIONS = [
@@ -57,6 +58,7 @@ export function SearchView({
   history,
   onPickHistory,
   onClearHistory,
+  searchPartial = false,
 }: SearchViewProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [focused, setFocused] = useState(false)
@@ -144,6 +146,12 @@ export function SearchView({
             </span>
           )}
         </div>
+
+        {searchPartial && (
+          <p className="search-partial-note type-caption">
+            Indexing in progress. Search only covers photos processed so far.
+          </p>
+        )}
 
         {tipsOpen && (
           <div className="search-tips panel-slide">

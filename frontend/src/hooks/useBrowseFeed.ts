@@ -8,6 +8,7 @@ export function useBrowseFeed(
 ) {
   const folder = options.folder ?? null
   const album = options.album ?? null
+  const sourceId = options.source_id ?? null
   const [items, setItems] = useState<ImageSummary[]>([])
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(true)
@@ -25,6 +26,7 @@ export function useBrowseFeed(
       const browseOptions: BrowseOptions = {}
       if (folder) browseOptions.folder = folder
       if (album) browseOptions.album = album
+      if (sourceId) browseOptions.source_id = sourceId
       const data = await browse(0, 40, sort, browseOptions)
       setItems(data.items)
       setOffset(data.items.length)
@@ -37,7 +39,7 @@ export function useBrowseFeed(
     } finally {
       setLoading(false)
     }
-  }, [sort, folder, album])
+  }, [sort, folder, album, sourceId])
 
   useEffect(() => {
     if (!enabled) return
@@ -52,6 +54,7 @@ export function useBrowseFeed(
         const browseOptions: BrowseOptions = {}
         if (folder) browseOptions.folder = folder
         if (album) browseOptions.album = album
+        if (sourceId) browseOptions.source_id = sourceId
         const data = await browse(0, 40, sort, browseOptions)
         if (cancelled) return
         setItems(data.items)
@@ -72,7 +75,7 @@ export function useBrowseFeed(
     return () => {
       cancelled = true
     }
-  }, [sort, folder, album, enabled])
+  }, [sort, folder, album, sourceId, enabled])
 
   const loadMore = useCallback(async () => {
     if (loading || !hasMore) return
@@ -81,6 +84,7 @@ export function useBrowseFeed(
       const browseOptions: BrowseOptions = {}
       if (folder) browseOptions.folder = folder
       if (album) browseOptions.album = album
+      if (sourceId) browseOptions.source_id = sourceId
       const data = await browse(offset, 40, sort, browseOptions)
       setItems((prev) => [...prev, ...data.items])
       setOffset((prev) => prev + data.items.length)
@@ -91,7 +95,7 @@ export function useBrowseFeed(
     } finally {
       setLoading(false)
     }
-  }, [offset, loading, hasMore, sort, folder, album])
+  }, [offset, loading, hasMore, sort, folder, album, sourceId])
 
   return { items, loading, error, hasMore, loadMore, total, reload }
 }

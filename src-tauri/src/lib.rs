@@ -17,6 +17,27 @@ fn project_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn opal_config_dir() -> Option<String> {
+    #[cfg(windows)]
+    {
+        std::env::var("APPDATA")
+            .ok()
+            .map(|appdata| format!("{}\\Opal", appdata))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var("HOME")
+            .ok()
+            .map(|home| format!("{}/Library/Application Support/Opal", home))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        std::env::var("HOME")
+            .ok()
+            .map(|home| format!("{}/.config/opal", home))
+    }
+}
+
 fn opal_python_from_file() -> Option<String> {
     let env_file = project_root().join("opal.env");
     let content = std::fs::read_to_string(&env_file).ok()?;
@@ -52,6 +73,10 @@ fn configure_api_command(cmd: &mut Command, root: &Path) {
         .env("OPAL_DESKTOP", "1")
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+
+    if let Some(config_dir) = opal_config_dir() {
+        cmd.env("OPAL_CONFIG_DIR", config_dir);
+    }
 
     #[cfg(windows)]
     {

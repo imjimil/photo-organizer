@@ -86,8 +86,40 @@ class SimilarResponse(BaseModel):
 class SourceSummary(BaseModel):
     id: str
     name: str
+    path: str
     count: int
+    browse_count: int = 0
     active: bool = True
+    enabled: bool = True
+    removed: bool = False
+    last_scan_at: str | None = None
+    indexing_phase: str | None = None
+
+
+class SourceCreateRequest(BaseModel):
+    path: str
+    name: str | None = None
+
+
+class SourceUpdateRequest(BaseModel):
+    name: str | None = None
+    enabled: bool | None = None
+
+
+class IndexStatusResponse(BaseModel):
+    running: bool
+    phase: str
+    source_id: str | None = None
+    current: int = 0
+    total: int = 0
+    percent: float = 0.0
+    eta_seconds: int | None = None
+    rate_per_second: float = 0.0
+    message: str = ""
+    error: str | None = None
+    counts: dict[str, int] = Field(default_factory=dict)
+    search_ready_percent: float = 0.0
+    browse_ready: int = 0
 
 
 class SourcesResponse(BaseModel):
