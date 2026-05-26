@@ -78,6 +78,11 @@ fn configure_api_command(cmd: &mut Command, root: &Path) {
         cmd.env("OPAL_CONFIG_DIR", config_dir);
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        cmd.env("PYTORCH_ENABLE_MPS_FALLBACK", "1");
+    }
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

@@ -35,7 +35,8 @@ from opal.api.schemas import (
     SourcesResponse,
     StatsResponse,
 )
-from opal.config import IMAGE_FOLDER, setup_logging
+from opal.config import CLIP_BATCH_SIZE, IMAGE_FOLDER, setup_logging
+from opal.device import device_label, resolve_torch_device
 from opal.index_service import get_index_service
 from opal.manifest import path_id
 from opal.search import MatchLevel, execute_search, merge_plan, parse_search
@@ -43,6 +44,14 @@ from opal.thumbnails import get_display_image
 
 setup_logging()
 logger = logging.getLogger("photo_organizer.api")
+
+_torch_device = resolve_torch_device()
+logger.info(
+    "Compute device: %s (%s), CLIP batch size %d",
+    _torch_device,
+    device_label(_torch_device),
+    CLIP_BATCH_SIZE,
+)
 
 app = FastAPI(title="Opal Gallery API", version="1.0.0")
 

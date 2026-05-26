@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from opal.config import IMAGE_FOLDER, OCR_LANGUAGES
+from opal.device import device_label, ocr_use_gpu, resolve_torch_device
 from opal.manifest import Manifest, PhotoRecord
 
 logger = logging.getLogger("photo_organizer.ocr_worker")
@@ -16,10 +17,15 @@ def _get_reader():
     if _reader is None:
         import easyocr
 
-        import torch
-
-        gpu = torch.cuda.is_available()
-        logger.info("Initializing EasyOCR (gpu=%s)", gpu)
+        gpu = ocr_use_gpu()
+        torch_device = resolve_torch_device()
+        if gpu:
+            logger.info("Initializing EasyOCR (gpu=True, %s)", device_label(torch_device))
+        else:
+            logger.info(
+                "Initializing EasyOCR (gpu=False, %s — OCR uses CPU on this platform)",
+                device_label(torch_device),
+            )
         _reader = easyocr.Reader(OCR_LANGUAGES, gpu=gpu)
     return _reader
 

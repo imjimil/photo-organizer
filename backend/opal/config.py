@@ -4,6 +4,10 @@ import logging
 import os
 from pathlib import Path
 
+from opal.device import configure_mps_fallback, default_clip_batch_size, resolve_torch_device
+
+configure_mps_fallback()
+
 # Paths (override via environment variables)
 IMAGE_FOLDER = Path(
     os.getenv("IMAGE_FOLDER", r"C:\Users\praja\Downloads\Demo_data_video")
@@ -17,8 +21,13 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "quotes_collection")
 CLIP_MODEL = os.getenv("CLIP_MODEL", "openai/clip-vit-base-patch32")
 OCR_LANGUAGES = os.getenv("OCR_LANGUAGES", "en").split(",")
 
-# Batch sizes
-CLIP_BATCH_SIZE = int(os.getenv("CLIP_BATCH_SIZE", "32"))
+# Batch sizes (CLIP default scales with GPU: cuda=32, mps=16, cpu=8)
+_clip_batch_env = os.getenv("CLIP_BATCH_SIZE")
+CLIP_BATCH_SIZE = (
+    int(_clip_batch_env)
+    if _clip_batch_env
+    else default_clip_batch_size(resolve_torch_device())
+)
 CHROMA_BATCH_SIZE = int(os.getenv("CHROMA_BATCH_SIZE", "500"))
 OCR_BATCH_LOG_INTERVAL = int(os.getenv("OCR_BATCH_LOG_INTERVAL", "50"))
 

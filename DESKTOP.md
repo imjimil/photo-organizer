@@ -28,6 +28,8 @@ The desktop app **starts the API automatically** when you open Opal and stops it
 ### macOS
 
 - Xcode Command Line Tools: `xcode-select --install`
+- **Apple Silicon:** CLIP indexing/search uses **Metal (MPS)** when PyTorch supports it. OCR stays on **CPU** (EasyOCR GPU is CUDA-only).
+- If CLIP runs out of memory, lower batch size in `opal.env`: `CLIP_BATCH_SIZE=8`
 
 ## Install tooling (once)
 
@@ -89,6 +91,9 @@ Installers are written to `src-tauri/target/release/bundle/`.
 | `IMAGE_FOLDER` | Image library path (see `backend/opal/config.py`) |
 | `MANIFEST_PATH` | SQLite manifest path |
 | `CHROMA_PATH` | ChromaDB folder |
+| `DEVICE` | Force `cuda`, `mps`, or `cpu` (auto if unset) |
+| `CLIP_BATCH_SIZE` | CLIP batch size (default: 32 CUDA, 16 MPS, 8 CPU) |
+| `PYTORCH_ENABLE_MPS_FALLBACK` | Set to `1` on macOS for unsupported MPS ops (Tauri sets this automatically) |
 
 ## Native commands
 
@@ -114,3 +119,5 @@ On macOS this also produces `icon.icns`.
 | API timeout on launch | Run `python backend/run.py api` manually and check errors |
 | Blank window / API errors | In Tauri, API base is `http://127.0.0.1:8000/api` (not Vite proxy) |
 | WebView2 missing (Windows) | Install Edge WebView2 runtime |
+| Indexing slow on Mac | Check API logs for `Compute device: mps`; if `cpu`, install PyTorch with MPS support |
+| CLIP OOM on Mac | Set `CLIP_BATCH_SIZE=8` in `opal.env` and restart the API |

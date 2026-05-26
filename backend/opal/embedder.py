@@ -8,14 +8,19 @@ from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
 from opal.config import CLIP_BATCH_SIZE, CLIP_MODEL, DEVICE
+from opal.device import device_label, resolve_torch_device
 
 logger = logging.getLogger("photo_organizer.embedder")
 
 
 class CLIPEmbedder:
     def __init__(self, device: str | None = None):
-        self.device = device or (DEVICE or ("cuda" if torch.cuda.is_available() else "cpu"))
-        logger.info("Loading CLIP model on %s", self.device)
+        self.device = resolve_torch_device(device or DEVICE or None)
+        logger.info(
+            "Loading CLIP model on %s (%s)",
+            self.device,
+            device_label(self.device),
+        )
         self.model = CLIPModel.from_pretrained(CLIP_MODEL).to(self.device)
         self.processor = CLIPProcessor.from_pretrained(CLIP_MODEL)
         self.model.eval()
@@ -45,6 +50,9 @@ class CLIPEmbedder:
             features = self._embed_images_tensor(images)
             for vec in features.cpu().tolist():
                 all_vectors.append(vec)
+
+            if self.device == "mps":
+                torch.mps.empty_cache()
 
         return all_vectors
 
