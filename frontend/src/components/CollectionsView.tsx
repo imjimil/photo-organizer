@@ -59,6 +59,13 @@ export function CollectionsView({
 
   return (
     <div className="collections-view">
+      <header className="collections-page-intro hidden md:block">
+        <h1 className="page-intro-title text-text-primary">Collections</h1>
+        <p className="type-caption text-text-muted mt-1">
+          Albums, libraries, and folders as stacked prints
+        </p>
+      </header>
+
       {libraries.length > 0 && (
         <section className="collections-section" aria-labelledby="libraries-heading">
           <div className="collections-section-head">
@@ -67,14 +74,14 @@ export function CollectionsView({
             </h2>
             <p className="type-caption text-text-muted">Folders you added to Opal</p>
           </div>
-          <div className="collections-grid">
-            {libraries.map((library) => (
-              <CollectionCard
+          <div className="print-stacks">
+            {libraries.map((library, index) => (
+              <PrintStack
                 key={library.id}
                 title={library.name}
                 count={library.browse_count}
+                size={index % 3}
                 onOpen={() => onOpenLibrary(library)}
-                kind="folder"
               />
             ))}
           </div>
@@ -89,33 +96,36 @@ export function CollectionsView({
           <p className="type-caption text-text-muted">Curated sets you build</p>
         </div>
 
-        <div className="collections-grid" ref={gridRef}>
-          <div data-flip-id="new-album" className="collection-grid-item">
-            <button type="button" className="collection-card" onClick={onNewAlbum}>
-              <div className="collection-card-cover collection-card-cover-new">
-                <span className="collection-card-new-icon" aria-hidden>
-                  +
-                </span>
+        <div className="print-stacks" ref={gridRef}>
+          <div data-flip-id="new-album" className="print-stack-slot">
+            <button type="button" className="print-stack print-stack-new" onClick={onNewAlbum}>
+              <div className="print-stack-sheets">
+                <div className="print-stack-sheet print-stack-sheet-empty" />
+                <div className="print-stack-sheet print-stack-sheet-empty" />
+                <div className="print-stack-sheet print-stack-sheet-empty print-stack-sheet-front">
+                  <span className="print-stack-new-icon" aria-hidden>+</span>
+                </div>
               </div>
-              <span className="collection-card-label">New album</span>
+              <span className="print-stack-tape">New album</span>
             </button>
           </div>
 
           {favoritesAlbum && (
-            <div data-flip-id={favoritesAlbum.id} className="collection-grid-item">
-              <CollectionCard
+            <div data-flip-id={favoritesAlbum.id} className="print-stack-slot">
+              <PrintStack
                 title={favoritesAlbum.name}
                 count={favoritesAlbum.count}
                 coverUrl={
                   favoritesAlbum.cover_photo_id ? thumbUrl(favoritesAlbum.cover_photo_id) : null
                 }
+                size={1}
                 onOpen={() => onOpenAlbum(favoritesAlbum)}
                 kind="favorites"
               />
             </div>
           )}
 
-          {orderedUserAlbums.map((album) => {
+          {orderedUserAlbums.map((album, index) => {
             const isDragging = draggingId === album.id
 
             return (
@@ -123,13 +133,14 @@ export function CollectionsView({
                 key={album.id}
                 data-flip-id={album.id}
                 data-album-slot={album.id}
-                className={`collection-grid-item ${isDragging ? 'collection-grid-item-source' : ''}`}
+                className={`print-stack-slot ${isDragging ? 'print-stack-slot-source' : ''}`}
                 style={isDragging && dragVisual ? { minHeight: dragVisual.height } : undefined}
                 aria-hidden={isDragging}
               >
                 {!isDragging && (
-                  <DraggableAlbumCard
+                  <DraggablePrintStack
                     album={album}
+                    size={(index + 2) % 3}
                     onOpen={() => {
                       if (shouldSuppressClick()) return
                       onOpenAlbum(album)
@@ -164,14 +175,14 @@ export function CollectionsView({
             </h2>
             <p className="type-caption text-text-muted">Groups inside your photos on disk</p>
           </div>
-          <div className="collections-grid">
-            {folders.map((folder) => (
-              <CollectionCard
+          <div className="print-stacks">
+            {folders.map((folder, index) => (
+              <PrintStack
                 key={folder.id}
                 title={folder.name}
                 count={folder.count}
+                size={(index + 1) % 3}
                 onOpen={() => onOpenFolder(folder)}
-                kind="folder"
               />
             ))}
           </div>
@@ -187,7 +198,16 @@ export function CollectionsView({
             style={{ width: dragVisual.width }}
             aria-hidden
           >
-            <AlbumDragPreview album={draggingAlbum} />
+            <PrintStack
+              title={draggingAlbum.name}
+              count={draggingAlbum.count}
+              coverUrl={
+                draggingAlbum.cover_photo_id ? thumbUrl(draggingAlbum.cover_photo_id) : null
+              }
+              size={1}
+              onOpen={() => {}}
+              dragging
+            />
           </div>,
           document.body,
         )}
@@ -195,67 +215,95 @@ export function CollectionsView({
   )
 }
 
-function AlbumDragPreview({ album }: { album: AlbumSummary }) {
+function PrintStack({
+  title,
+  count,
+  coverUrl,
+  onOpen,
+  size = 0,
+  kind = 'album',
+  dragging = false,
+}: {
+  title: string
+  count: number
+  coverUrl?: string | null
+  onOpen: () => void
+  size?: number
+  kind?: 'album' | 'favorites'
+  dragging?: boolean
+}) {
   return (
-    <div className="collection-card-wrap collection-card-wrap-dragging">
-      <div className="collection-card">
-        <div className="collection-card-cover">
-          {album.cover_photo_id ? (
-            <img
-              src={thumbUrl(album.cover_photo_id)}
-              alt=""
-              className="collection-card-img"
-              draggable={false}
-            />
+    <button
+      type="button"
+      className={`print-stack print-stack-size-${size} ${dragging ? 'print-stack-dragging' : ''}`}
+      onClick={onOpen}
+    >
+      <div className="print-stack-sheets">
+        <div className="print-stack-sheet print-stack-sheet-back">
+          {coverUrl ? <img src={coverUrl} alt="" draggable={false} /> : <SheetPlaceholder kind={kind} title={title} />}
+        </div>
+        <div className="print-stack-sheet print-stack-sheet-mid">
+          {coverUrl ? <img src={coverUrl} alt="" draggable={false} /> : <SheetPlaceholder kind={kind} title={title} />}
+        </div>
+        <div className="print-stack-sheet print-stack-sheet-front">
+          {coverUrl ? (
+            <img src={coverUrl} alt="" loading="lazy" draggable={false} />
           ) : (
-            <div className="collection-card-placeholder collection-card-placeholder-album">
-              <span className="collection-card-initial" aria-hidden>
-                {album.name.charAt(0).toUpperCase()}
-              </span>
-            </div>
+            <SheetPlaceholder kind={kind} title={title} />
           )}
         </div>
-        <span className="collection-card-label">{album.name}</span>
-        <span className="collection-card-count type-meta">{album.count.toLocaleString()}</span>
       </div>
+      <span className="print-stack-tape">
+        <span className="print-stack-tape-name">{title}</span>
+        <span className="print-stack-tape-count type-meta">{count.toLocaleString()}</span>
+      </span>
+    </button>
+  )
+}
+
+function SheetPlaceholder({
+  kind,
+  title,
+}: {
+  kind: 'album' | 'favorites'
+  title: string
+}) {
+  if (kind === 'favorites') {
+    return (
+      <div className="print-stack-placeholder print-stack-placeholder-favorites">
+        <IconStar className="print-stack-star" filled />
+      </div>
+    )
+  }
+  return (
+    <div className="print-stack-placeholder">
+      <span aria-hidden>{title.charAt(0).toUpperCase()}</span>
     </div>
   )
 }
 
-function DraggableAlbumCard({
+function DraggablePrintStack({
   album,
+  size,
   onOpen,
   onManage,
   onHandlePointerDown,
 }: {
   album: AlbumSummary
+  size: number
   onOpen: () => void
   onManage: () => void
   onHandlePointerDown: (event: React.PointerEvent<HTMLElement>) => void
 }) {
   return (
-    <div className="collection-card-wrap">
-      <button type="button" className="collection-card" onClick={onOpen}>
-        <div className="collection-card-cover">
-          {album.cover_photo_id ? (
-            <img
-              src={thumbUrl(album.cover_photo_id)}
-              alt=""
-              className="collection-card-img"
-              loading="lazy"
-              draggable={false}
-            />
-          ) : (
-            <div className="collection-card-placeholder collection-card-placeholder-album">
-              <span className="collection-card-initial" aria-hidden>
-                {album.name.charAt(0).toUpperCase()}
-              </span>
-            </div>
-          )}
-        </div>
-        <span className="collection-card-label">{album.name}</span>
-        <span className="collection-card-count type-meta">{album.count.toLocaleString()}</span>
-      </button>
+    <div className="print-stack-wrap">
+      <PrintStack
+        title={album.name}
+        count={album.count}
+        coverUrl={album.cover_photo_id ? thumbUrl(album.cover_photo_id) : null}
+        size={size}
+        onOpen={onOpen}
+      />
 
       <button
         type="button"
@@ -279,59 +327,6 @@ function DraggableAlbumCard({
       >
         ···
       </button>
-    </div>
-  )
-}
-
-function CollectionCard({
-  title,
-  count,
-  coverUrl,
-  onOpen,
-  onManage,
-  kind,
-}: {
-  title: string
-  count: number
-  coverUrl?: string | null
-  onOpen: () => void
-  onManage?: () => void
-  kind: 'album' | 'folder' | 'favorites'
-}) {
-  return (
-    <div className="collection-card-wrap">
-      <button type="button" className="collection-card" onClick={onOpen}>
-        <div className="collection-card-cover">
-          {coverUrl ? (
-            <img src={coverUrl} alt="" className="collection-card-img" loading="lazy" />
-          ) : (
-            <div className={`collection-card-placeholder collection-card-placeholder-${kind}`}>
-              {kind === 'favorites' ? (
-                <IconStar className="collection-card-star" filled />
-              ) : (
-                <span className="collection-card-initial" aria-hidden>
-                  {title.charAt(0).toUpperCase()}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-        <span className="collection-card-label">{title}</span>
-        <span className="collection-card-count type-meta">{count.toLocaleString()}</span>
-      </button>
-      {onManage && (
-        <button
-          type="button"
-          className="collection-card-menu"
-          aria-label={`Manage ${title}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            onManage()
-          }}
-        >
-          ···
-        </button>
-      )}
     </div>
   )
 }

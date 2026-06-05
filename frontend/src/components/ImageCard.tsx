@@ -1,10 +1,12 @@
 import type { ImageSummary, SearchResult } from '../api/client'
 import { thumbUrl } from '../api/client'
+import type { MosaicBox } from '../hooks/useJustifiedLayout'
 import { imageAriaLabel } from '../utils/imageLabel'
 
 interface ImageCardProps {
   photoId: string
   item: ImageSummary | SearchResult
+  box?: MosaicBox
   onClick: () => void
   showMatchKind?: boolean
   staggerIndex?: number
@@ -18,6 +20,7 @@ interface ImageCardProps {
 export function ImageCard({
   photoId,
   item,
+  box,
   onClick,
   showMatchKind,
   staggerIndex = 0,
@@ -53,20 +56,28 @@ export function ImageCard({
     onBeginSelection?.()
   }
 
-  const animate = staggerIndex >= 0 && staggerIndex < 20
+  const animate = staggerIndex >= 0 && staggerIndex < 12
+
+  const positionStyle = box
+    ? {
+        top: box.top,
+        left: box.left,
+        width: box.width,
+        height: box.height,
+      }
+    : undefined
 
   return (
     <div
       data-photo-id={photoId}
       className={`photo-tile-wrap group ${animate ? '' : 'photo-tile-wrap-static'} ${selectionMode ? 'photo-tile-wrap-selecting' : ''} ${selected ? 'photo-tile-wrap-selected' : ''}`}
-      style={
-        animate ? { animationDelay: `${staggerIndex * 30}ms` } : undefined
-      }
+      style={positionStyle}
     >
       <button
         type="button"
         onClick={handleOpen}
         className={`photo-tile ${selected ? 'photo-tile-selected' : ''}`}
+        style={animate ? { animationDelay: `${staggerIndex * 40}ms` } : undefined}
         aria-label={imageAriaLabel(item)}
         aria-pressed={selectionMode ? selected : undefined}
       >

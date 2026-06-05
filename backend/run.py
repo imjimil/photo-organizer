@@ -17,6 +17,7 @@ COMMANDS = {
     "api": "opal.api.main",
     "index": "opal.cli.index_library",
     "duplicates": "opal.cli.find_duplicates",
+    "dimensions": "opal.cli.backfill_dimensions",
 }
 
 

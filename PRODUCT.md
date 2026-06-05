@@ -10,19 +10,21 @@ One person with ~25k saved quote screenshots, literary passages, and mood images
 
 ## Product Purpose
 
-Opal is a private inspiration library. It should feel like **Cosmos meets a sunlit print table**: bright, fluid, image-first. Not a file manager. Not a dark developer tool.
+Opal is a private inspiration library. It should feel like **a darkroom print table**: cool-slate by day, warm safelight at night, image-first, considered. Not a file manager. Not a dark developer tool.
 
 ## Brand Personality
 
-Luminous, curious, unhurried. **Iridescent, intimate, alive.**
+Amber-lit, considered, alive. Quiet chrome, saturated photos.
 
 ## Anti-references
 
 - Brown maison / Cartier clone from v4–v5
+- Iridescent violet/mint glow from v6
 - Left sidebar dashboard layout
-- Generic AI dark mode
+- Generic AI dark mode (purple-blue gradients)
+- Editorial-magazine ruled-metadata aesthetic
 - OCR on thumbnails
-- Training-data fonts (Inter, Instrument Sans, Fraunces, Newsreader)
+- Training-data fonts (Inter, Instrument Sans, Fraunces, Newsreader, Cal Sans UI)
 
 ## Core flows
 

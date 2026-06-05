@@ -23,7 +23,7 @@ from opal.organizer import (
     plan_exif_organization,
 )
 from opal.scanner import scan_images
-from opal.thumbnails import generate_thumbnail
+from opal.thumbnails import generate_thumbnail_with_dims
 
 logger = logging.getLogger("photo_organizer.index")
 
@@ -276,8 +276,13 @@ def run_thumbnails(
     count = 0
     for record in tqdm(records, desc="Thumbnails"):
         path = image_root / record.rel_path
-        if path.exists() and generate_thumbnail(path, record.id):
+        if not path.exists():
+            continue
+        thumb, dims = generate_thumbnail_with_dims(path, record.id)
+        if thumb:
             count += 1
+        if dims and (record.width is None or record.height is None):
+            manifest.update_dimensions(record.id, dims[0], dims[1])
     return count
 
 

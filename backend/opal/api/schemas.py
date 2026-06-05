@@ -18,6 +18,8 @@ class ImageSummary(BaseModel):
     ocr_preview: str
     exif_date: str | None
     thumb_url: str
+    w: int | None = None
+    h: int | None = None
 
 
 class BrowseResponse(BaseModel):

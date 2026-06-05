@@ -40,4 +40,6 @@ def record_to_summary(record: PhotoRecord) -> dict:
         "ocr_preview": preview,
         "exif_date": record.exif_date,
         "thumb_url": f"/api/thumbs/{pid}",
+        "w": record.width,
+        "h": record.height,
     }

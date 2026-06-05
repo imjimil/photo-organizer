@@ -11,6 +11,7 @@
     "index:ocr": "node scripts/run-backend.mjs index --mode ocr",
     "index:full": "node scripts/run-backend.mjs index --mode full",
     "duplicates": "node scripts/run-backend.mjs duplicates",
+    "dimensions": "node scripts/run-backend.mjs dimensions",
     "dev:desktop": "tauri dev",
     "build:frontend": "npm run build --prefix frontend",
     "build:desktop": "tauri build",

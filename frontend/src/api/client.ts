@@ -6,6 +6,8 @@ export interface ImageSummary {
   ocr_preview: string
   exif_date: string | null
   thumb_url: string
+  w: number | null
+  h: number | null
 }
 
 export interface SearchResult extends ImageSummary {

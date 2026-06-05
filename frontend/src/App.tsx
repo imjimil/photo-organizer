@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createAlbum,
+  discover,
   getAlbums,
   getCollections,
   getStats,
@@ -28,7 +29,11 @@ import { Lightbox } from './components/Lightbox'
 import { PhotoGrid } from './components/PhotoGrid'
 import { SearchView } from './components/SearchView'
 import { SelectionBar } from './components/SelectionBar'
-import { MobileHeader, TopNav, type AppView } from './components/TopNav'
+import { EdgeRail, type AppView } from './components/EdgeRail'
+import { HomeBento } from './components/HomeBento'
+import { LibraryToolbar } from './components/LibraryToolbar'
+import { MobileHeader } from './components/MobileHeader'
+import { Titlebar } from './components/Titlebar'
 import {
   defaultCollectionScope,
   type CollectionScope,
@@ -62,7 +67,8 @@ export default function App() {
   const searchAbortRef = useRef<AbortController | null>(null)
   const { items: searchHistory, record: recordSearchHistory, clear: clearSearchHistory } =
     useSearchHistory()
-  const [view, setView] = useState<AppView>('library')
+  const [view, setView] = useState<AppView>('home')
+  const [discoverCover, setDiscoverCover] = useState<import('./api/client').ImageSummary | null>(null)
   const [collectionScope, setCollectionScope] = useState<CollectionScope>(defaultCollectionScope)
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebouncedValue(query, 400)
@@ -179,6 +185,9 @@ export default function App() {
       .then((r) => setCollections(r.collections))
       .catch(() => {})
     refreshAlbums()
+    discover(1)
+      .then((r) => setDiscoverCover(r.items[0] ?? null))
+      .catch(() => {})
   }, [refreshAlbums, toast])
 
   useEffect(() => {
@@ -466,25 +475,17 @@ export default function App() {
         {searchStatus}
       </p>
 
-      <div className="relative z-10 flex min-h-dvh flex-col pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0">
-        <TopNav
+      <div className="app-shell-grid relative z-10 min-h-dvh pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0">
+        <Titlebar />
+        <EdgeRail
           view={view}
           onViewChange={handleViewChange}
-          total={statsTotal || libraryTotal}
           themeMode={themeMode}
           onThemeCycle={cycleTheme}
-          sort={feedSort}
-          onSortChange={setFeedSort}
-          showSort={view === 'library'}
-          selectionMode={selectionMode}
-          onEnterSelection={
-            view === 'library' || (view === 'collections' && inCollectionDetail)
-              ? enterSelectionMode
-              : undefined
-          }
-          sourcesLabel={sourcesLabel}
           onOpenSources={openSources}
         />
+
+        <div className="app-canvas flex min-h-0 flex-1 flex-col">
         <MobileHeader
           view={view}
           total={mobileHeaderTotal}
@@ -509,6 +510,31 @@ export default function App() {
             status={indexStatus}
             onOpenSettings={() => setSettingsOpen(true)}
           />
+        )}
+
+        {view === 'home' && (
+          <div key="home" className="view-enter flex flex-1 flex-col">
+            <main
+              id="main-content"
+              className="mx-auto w-full max-w-[1680px] flex-1 px-4 pb-8 pt-4 md:px-8 md:pb-12 md:pt-6"
+            >
+              <HomeBento
+                total={statsTotal || libraryTotal}
+                recent={libraryItems.slice(0, 24)}
+                collections={collections}
+                discoverCover={discoverCover}
+                onOpenPhoto={setSelectedId}
+                onOpenCollection={handleOpenFolder}
+                onShuffle={() => {
+                  setFeedSort('random')
+                  setView('library')
+                }}
+                onDiscover={() => setView('discover')}
+                onOpenLibrary={() => setView('library')}
+                onSearch={() => setView('search')}
+              />
+            </main>
+          </div>
         )}
 
         {view === 'library' && (
@@ -541,6 +567,15 @@ export default function App() {
               className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6 md:pb-12"
               onClick={handleGridMainClick}
             >
+              <LibraryToolbar
+                total={statsTotal || libraryTotal}
+                sort={feedSort}
+                onSortChange={setFeedSort}
+                selectionMode={selectionMode}
+                onEnterSelection={enterSelectionMode}
+                sourcesLabel={sourcesLabel}
+                onOpenSources={openSources}
+              />
               {showLibraryEmpty ? (
                 <LibraryEmpty
                   indexed={libraryIndexed}
@@ -711,6 +746,7 @@ export default function App() {
         )}
 
         <BottomNav view={view} onViewChange={handleViewChange} hidden={hideBottomNav} />
+        </div>
       </div>
 
       {settingsOpen && (

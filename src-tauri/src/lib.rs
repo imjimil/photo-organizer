@@ -246,6 +246,13 @@ pub fn run() {
     let api_state = ApiProcess(Mutex::new(Some(api_child)));
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_frame::FramePluginBuilder::new()
+                .auto_titlebar(false)
+                .snap_overlay(true)
+                .titlebar_height(32)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(api_state)

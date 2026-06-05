@@ -72,6 +72,8 @@ class PhotoRecord:
     error_msg: str | None
     duplicate_of: str | None
     exif_date: str | None
+    width: int | None = None
+    height: int | None = None
 
 
 SCHEMA = """
@@ -88,7 +90,9 @@ CREATE TABLE IF NOT EXISTS photos (
     status TEXT DEFAULT 'pending',
     error_msg TEXT,
     duplicate_of TEXT,
-    exif_date TEXT
+    exif_date TEXT,
+    width INTEGER,
+    height INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status);
 CREATE INDEX IF NOT EXISTS idx_photos_rel_path ON photos(rel_path);
@@ -123,6 +127,14 @@ class Manifest:
             self._migrate_albums(conn)
             self._migrate_search_history(conn)
             self._migrate_sources(conn)
+            self._migrate_dimensions(conn)
+
+    def _migrate_dimensions(self, conn: sqlite3.Connection) -> None:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(photos)")}
+        if "width" not in cols:
+            conn.execute("ALTER TABLE photos ADD COLUMN width INTEGER")
+        if "height" not in cols:
+            conn.execute("ALTER TABLE photos ADD COLUMN height INTEGER")
 
     def _migrate_search_history(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -411,6 +423,9 @@ class Manifest:
 
     def _row_to_record(self, row: sqlite3.Row) -> PhotoRecord:
         source_id = row["source_id"] if "source_id" in row.keys() else DEFAULT_SOURCE_ID
+        keys = row.keys()
+        width = row["width"] if "width" in keys else None
+        height = row["height"] if "height" in keys else None
         return PhotoRecord(
             id=row["id"],
             source_id=source_id,
@@ -426,6 +441,8 @@ class Manifest:
             error_msg=row["error_msg"],
             duplicate_of=row["duplicate_of"],
             exif_date=row["exif_date"],
+            width=width,
+            height=height,
         )
 
     def get_by_id(self, photo_id: str) -> PhotoRecord | None:
@@ -1039,6 +1056,29 @@ class Manifest:
                 "UPDATE photos SET file_size = ?, mtime = ? WHERE id = ?",
                 (file_size, mtime, file_id),
             )
+
+    def update_dimensions(self, photo_id: str, width: int, height: int) -> None:
+        if width <= 0 or height <= 0:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE photos SET width = ?, height = ? WHERE id = ?",
+                (width, height, photo_id),
+            )
+
+    def list_missing_dimensions(self, limit: int | None = None) -> list[PhotoRecord]:
+        sql = (
+            "SELECT * FROM photos WHERE (width IS NULL OR height IS NULL) "
+            "AND status != 'missing' "
+            "ORDER BY rel_path"
+        )
+        params: list = []
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._row_to_record(r) for r in rows]
 
     def _sync_status_for_content_hash(self, content_hash: str, conn: sqlite3.Connection) -> None:
         canonical = conn.execute(

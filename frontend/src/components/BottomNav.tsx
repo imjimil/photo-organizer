@@ -1,4 +1,4 @@
-import type { AppView } from './TopNav'
+import type { AppView } from './EdgeRail'
 import { NavPill } from './NavPill'
 
 interface BottomNavProps {

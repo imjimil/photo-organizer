@@ -19,11 +19,13 @@
         "minWidth": 900,
         "minHeight": 600,
         "center": true,
-        "resizable": true
+        "resizable": true,
+        "decorations": false,
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 ipc: http://ipc.localhost; img-src 'self' http://127.0.0.1:8000 http://localhost:8000 asset: blob: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 ipc: http://ipc.localhost; img-src 'self' http://127.0.0.1:8000 http://localhost:8000 asset: blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   },
   "bundle": {

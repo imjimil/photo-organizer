@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { ImageSummary, SearchResult } from '../api/client'
 import { useDragSelect } from '../hooks/useDragSelect'
+import { useJustifiedLayout } from '../hooks/useJustifiedLayout'
 import { ImageCard } from './ImageCard'
 
 interface PhotoGridProps {
@@ -40,6 +41,7 @@ export function PhotoGrid({
 }: PhotoGridProps) {
   const sentinel = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
+  const layout = useJustifiedLayout(items, gridRef)
 
   const drag = useDragSelect({
     enabled: selectable && Boolean(onBeginSelection && onSelectId && onDeselectId),
@@ -78,38 +80,42 @@ export function PhotoGrid({
         </p>
       )}
       {!error && (
-      <div
-        ref={gridRef}
-        className={`photo-grid ${selectionMode ? 'photo-grid-selecting' : ''} ${selectable ? 'photo-grid-selectable' : ''}`}
-        {...(selectable ? drag.gridHandlers : {})}
-        style={{ touchAction: selectionMode || drag.isDragging ? 'none' : 'pan-y' }}
-        onClick={(e) => {
-          if (selectionMode) e.stopPropagation()
-        }}
-      >
-        {items.map((item, index) => (
-          <ImageCard
-            key={item.id}
-            photoId={item.id}
-            item={item}
-            onClick={() => {
-              if (drag.shouldSuppressClick()) return
-              onSelect(item)
-            }}
-            showMatchKind={showMatchKind}
-            staggerIndex={index < 20 ? index : -1}
-            selectionMode={selectionMode}
-            selected={selectedIds?.has(item.id) ?? false}
-            onToggleSelect={
-              onToggleSelect ? () => onToggleSelect(item.id) : undefined
-            }
-            onBeginSelection={
-              onBeginSelection ? () => onBeginSelection(item.id) : undefined
-            }
-            selectable={selectable}
-          />
-        ))}
-      </div>
+        <div
+          ref={gridRef}
+          className={`photo-grid ${selectionMode ? 'photo-grid-selecting' : ''} ${selectable ? 'photo-grid-selectable' : ''}`}
+          style={{ height: layout ? layout.containerHeight : undefined }}
+          {...(selectable ? drag.gridHandlers : {})}
+          onClick={(e) => {
+            if (selectionMode) e.stopPropagation()
+          }}
+        >
+          {items.map((item, index) => {
+            const box = layout?.boxes[index]
+            return (
+              <ImageCard
+                key={item.id}
+                photoId={item.id}
+                item={item}
+                box={box}
+                onClick={() => {
+                  if (drag.shouldSuppressClick()) return
+                  onSelect(item)
+                }}
+                showMatchKind={showMatchKind}
+                staggerIndex={index < 12 ? index : -1}
+                selectionMode={selectionMode}
+                selected={selectedIds?.has(item.id) ?? false}
+                onToggleSelect={
+                  onToggleSelect ? () => onToggleSelect(item.id) : undefined
+                }
+                onBeginSelection={
+                  onBeginSelection ? () => onBeginSelection(item.id) : undefined
+                }
+                selectable={selectable}
+              />
+            )
+          })}
+        </div>
       )}
       <div ref={sentinel} className="h-px" aria-hidden />
       {!error && loading && items.length === 0 && (
