@@ -1,36 +1,55 @@
-"""Batched CLIP image and text embedding."""
+"""Batched SigLIP / CLIP image and text embedding."""
 
 import logging
 from pathlib import Path
 
 import torch
 from PIL import Image
-from transformers import CLIPModel, CLIPProcessor
+from transformers import AutoModel, AutoProcessor
 
 from opal.config import CLIP_BATCH_SIZE, CLIP_MODEL, DEVICE
 from opal.device import device_label, resolve_torch_device
 
 logger = logging.getLogger("photo_organizer.embedder")
 
+SIGLIP_TEXT_MAX_LENGTH = 64
+
 
 class CLIPEmbedder:
     def __init__(self, device: str | None = None):
         self.device = resolve_torch_device(device or DEVICE or None)
         logger.info(
-            "Loading CLIP model on %s (%s)",
+            "Loading embedding model %s on %s (%s)",
+            CLIP_MODEL,
             self.device,
             device_label(self.device),
         )
-        self.model = CLIPModel.from_pretrained(CLIP_MODEL).to(self.device)
-        self.processor = CLIPProcessor.from_pretrained(CLIP_MODEL)
+        self.model = AutoModel.from_pretrained(CLIP_MODEL).to(self.device)
+        self.processor = AutoProcessor.from_pretrained(CLIP_MODEL, use_fast=True)
         self.model.eval()
+        self._siglip = "siglip" in CLIP_MODEL.lower()
+
+    @property
+    def embedding_dim(self) -> int:
+        config = self.model.config
+        if getattr(config, "projection_dim", None):
+            return int(config.projection_dim)
+        vision = getattr(config, "vision_config", None)
+        if vision is not None and getattr(vision, "hidden_size", None):
+            return int(vision.hidden_size)
+        text = getattr(config, "text_config", None)
+        if text is not None and getattr(text, "hidden_size", None):
+            return int(text.hidden_size)
+        return int(config.hidden_size)
+
+    def _normalize(self, features: torch.Tensor) -> torch.Tensor:
+        return features / features.norm(dim=-1, keepdim=True)
 
     def _embed_images_tensor(self, images: list[Image.Image]) -> torch.Tensor:
         inputs = self.processor(images=images, return_tensors="pt").to(self.device)
         with torch.no_grad():
-            vision_outputs = self.model.vision_model(pixel_values=inputs["pixel_values"])
-            features = self.model.visual_projection(vision_outputs.pooler_output)
-            features = features / features.norm(dim=-1, keepdim=True)
+            features = self.model.get_image_features(**inputs)
+            features = self._normalize(features)
         return features
 
     def embed_images_batch(
@@ -58,14 +77,19 @@ class CLIPEmbedder:
 
     def embed_text(self, text: str) -> list[float]:
         """Embed a single text query."""
-        inputs = self.processor(
-            text=[text], return_tensors="pt", padding=True, truncation=True
-        ).to(self.device)
+        if self._siglip:
+            inputs = self.processor(
+                text=[text],
+                return_tensors="pt",
+                padding="max_length",
+                max_length=SIGLIP_TEXT_MAX_LENGTH,
+                truncation=True,
+            ).to(self.device)
+        else:
+            inputs = self.processor(
+                text=[text], return_tensors="pt", padding=True, truncation=True
+            ).to(self.device)
         with torch.no_grad():
-            text_outputs = self.model.text_model(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs.get("attention_mask"),
-            )
-            features = self.model.text_projection(text_outputs.pooler_output)
-            features = features / features.norm(dim=-1, keepdim=True)
+            features = self.model.get_text_features(**inputs)
+            features = self._normalize(features)
         return features.flatten().cpu().tolist()

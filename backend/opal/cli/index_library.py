@@ -3,14 +3,20 @@
 import argparse
 import logging
 from pathlib import Path
-
-from pathlib import Path
 from typing import Callable
 
 from tqdm import tqdm
 
 from opal.chroma_store import ChromaStore
-from opal.config import CLIP_BATCH_SIZE, CHROMA_PATH, IMAGE_FOLDER, MANIFEST_PATH, THUMB_CACHE_PATH, setup_logging
+from opal.config import (
+    CLIP_BATCH_SIZE,
+    CLIP_MODEL,
+    CHROMA_PATH,
+    IMAGE_FOLDER,
+    MANIFEST_PATH,
+    THUMB_CACHE_PATH,
+    setup_logging,
+)
 from opal.embedder import CLIPEmbedder
 from opal.manifest import Manifest, PhotoRecord, path_id
 from opal.sources import DEFAULT_SOURCE_ID
@@ -23,9 +29,29 @@ from opal.organizer import (
     plan_exif_organization,
 )
 from opal.scanner import scan_images
-from opal.thumbnails import generate_thumbnail_with_dims
+from opal.thumbnails import generate_thumbnail_with_dims, thumb_path
 
 logger = logging.getLogger("photo_organizer.index")
+
+
+def prepare_index_upgrade(
+    manifest: Manifest,
+    chroma: ChromaStore,
+    embedder: CLIPEmbedder | None = None,
+    *,
+    clip: bool = True,
+    ocr: bool = True,
+) -> None:
+    """Re-queue work when the visual or OCR model changed."""
+    if clip:
+        if embedder is None:
+            embedder = CLIPEmbedder()
+        chroma_recreated = chroma.ensure_embedding_collection(
+            CLIP_MODEL, embedder.embedding_dim
+        )
+        manifest.prepare_clip_upgrade(chroma_recreated=chroma_recreated)
+    if ocr:
+        manifest.prepare_ocr_upgrade()
 
 
 def reset_index_data() -> None:
@@ -64,9 +90,26 @@ def sync_manifest(
     existing_paths = manifest.get_all_rel_paths(source_id=sid)
     missing = existing_paths - scanned_paths
     if missing:
-        removed = manifest.mark_missing(missing, source_id=sid)
-        stats["marked_missing"] = removed
-        logger.info("Marked %d files as missing", removed)
+        removed_records = manifest.mark_missing(missing, source_id=sid)
+        stats["marked_missing"] = len(removed_records)
+        logger.info("Marked %d files as missing", len(removed_records))
+        orphaned = manifest.orphaned_content_hashes(
+            [r.content_hash for r in removed_records]
+        )
+        if orphaned and chroma:
+            chroma.delete_ids(orphaned)
+            logger.info("Removed %d orphaned vectors from Chroma", len(orphaned))
+        for record in removed_records:
+            thumb = thumb_path(record.id)
+            if thumb.exists():
+                try:
+                    thumb.unlink()
+                except OSError:
+                    pass
+        stats["purged_vectors"] = len(orphaned) if orphaned else 0
+    else:
+        stats["marked_missing"] = 0
+        stats["purged_vectors"] = 0
 
     for item in scanned:
         _, needs_reindex, stale_chroma_id, is_identical = manifest.upsert_scanned(sid, item)
@@ -223,8 +266,8 @@ def update_chroma_documents(manifest: Manifest, chroma: ChromaStore) -> int:
         if not sync_ids:
             continue
 
-        # Keep existing CLIP vectors; updating documents alone would re-embed
-        # with Chroma's default model (384-d) and fail against our 512-d index.
+        # Keep existing vectors; updating documents alone would re-embed
+        # with Chroma's default model and fail against our custom index.
         chroma.collection.update(
             ids=sync_ids,
             documents=sync_docs,
@@ -316,14 +359,28 @@ def run_index(
 
     pending_clip = manifest.get_pending_clip()
     if clip:
-        if incremental and not pending_clip and scan_stats["new_or_changed"] == 0:
-            logger.info("No changes detected — skipping CLIP phase")
-        else:
+        needs_clip_upgrade = (
+            not chroma.embedding_model_matches(CLIP_MODEL)
+            or manifest.has_stale_clip_model()
+        )
+        if needs_clip_upgrade or pending_clip or not incremental:
             embedder = CLIPEmbedder()
-            clip_stats = run_clip_phase(manifest, chroma, embedder)
-            logger.info("CLIP phase: %s", clip_stats)
+            if needs_clip_upgrade or not incremental:
+                prepare_index_upgrade(
+                    manifest, chroma, embedder, clip=True, ocr=False
+                )
+                pending_clip = manifest.get_pending_clip()
+            if incremental and not pending_clip and scan_stats["new_or_changed"] == 0:
+                logger.info("No changes detected — skipping CLIP phase")
+            else:
+                clip_stats = run_clip_phase(manifest, chroma, embedder)
+                logger.info("CLIP phase: %s", clip_stats)
+        elif incremental and scan_stats["new_or_changed"] == 0:
+            logger.info("No changes detected — skipping CLIP phase")
 
     if ocr:
+        if manifest.has_stale_ocr_engine() or not incremental:
+            prepare_index_upgrade(manifest, chroma, clip=False, ocr=True)
         ocr_stats = run_ocr_phase(manifest)
         logger.info("OCR phase: %s", ocr_stats)
         updated = update_chroma_documents(manifest, chroma)
@@ -375,11 +432,14 @@ def main() -> None:
         chroma = ChromaStore()
         sync_manifest(manifest, chroma)
         embedder = CLIPEmbedder()
+        prepare_index_upgrade(manifest, chroma, embedder, clip=True, ocr=False)
         stats = run_clip_phase(manifest, chroma, embedder)
         logger.info("CLIP-only complete: %s", stats)
         print_summary(manifest, chroma)
     elif args.mode == "ocr":
         manifest = Manifest()
+        chroma = ChromaStore()
+        prepare_index_upgrade(manifest, chroma, clip=False, ocr=True)
         stats = run_ocr_phase(manifest)
         chroma = ChromaStore()
         updated = update_chroma_documents(manifest, chroma)

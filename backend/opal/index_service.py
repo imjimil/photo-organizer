@@ -12,13 +12,14 @@ from pathlib import Path
 
 from opal.chroma_store import ChromaStore
 from opal.cli.index_library import (
+    prepare_index_upgrade,
     run_clip_phase,
     run_ocr_phase,
     run_thumbnails,
     sync_manifest,
     update_chroma_documents,
 )
-from opal.config import IMAGE_FOLDER
+from opal.config import CLIP_MODEL, IMAGE_FOLDER
 from opal.embedder import CLIPEmbedder
 from opal.manifest import Manifest, STATUS_INDEXED, STATUS_OCR_DONE, STATUS_CLIP_DONE
 
@@ -93,9 +94,26 @@ class IndexJobService:
         self._state = IndexJobState()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
+        self._queue: list[str | None] = []
+        self._queue_lock = threading.Lock()
 
     def status(self, manifest: Manifest) -> dict[str, Any]:
         return self._state.snapshot(manifest)
+
+    def request(
+        self,
+        manifest: Manifest,
+        chroma: ChromaStore,
+        source_id: str | None = None,
+    ) -> bool:
+        """Start indexing now, or queue if a job is already running."""
+        if self.start(manifest, chroma, source_id):
+            return True
+        with self._queue_lock:
+            if source_id not in self._queue:
+                self._queue.append(source_id)
+                logger.info("Index busy — queued source %s", source_id or "all")
+        return False
 
     def start(self, manifest: Manifest, chroma: ChromaStore, source_id: str | None = None) -> bool:
         with self._state._lock:
@@ -145,6 +163,14 @@ class IndexJobService:
             self._state.error = error
             self._state.message = "Complete" if not error else error
 
+    def _drain_queue(self, manifest: Manifest, chroma: ChromaStore) -> None:
+        with self._queue_lock:
+            if not self._queue:
+                return
+            next_id = self._queue.pop(0)
+        logger.info("Starting queued index for source %s", next_id or "all")
+        self.start(manifest, chroma, next_id)
+
     def _run(self, manifest: Manifest, chroma: ChromaStore, source_id: str | None) -> None:
         try:
             sources = manifest.list_sources(include_removed=False, enabled_only=False)
@@ -155,6 +181,7 @@ class IndexJobService:
 
             if not targets:
                 self._finish("No enabled sources to index")
+                self._drain_queue(manifest, chroma)
                 return
 
             for source in targets:
@@ -166,6 +193,7 @@ class IndexJobService:
         except Exception as exc:
             logger.exception("Index job failed")
             self._finish(str(exc))
+        self._drain_queue(manifest, chroma)
 
     def _index_source(
         self, manifest: Manifest, chroma: ChromaStore, source_id: str, root: Path
@@ -191,25 +219,40 @@ class IndexJobService:
         if self._cancel.is_set():
             return
 
+        # Only load the heavy embedder when new/changed photos need CLIP,
+        # or when the visual model changed and a re-queue is required.
+        needs_clip_upgrade = (
+            not chroma.embedding_model_matches(CLIP_MODEL)
+            or manifest.has_stale_clip_model()
+        )
         pending_clip = manifest.get_pending_clip(source_id)
-        if pending_clip:
-            self._set_phase("clip", "Visual indexing…", len(pending_clip))
+        if needs_clip_upgrade or pending_clip:
             embedder = CLIPEmbedder()
-            done = 0
+            if needs_clip_upgrade:
+                prepare_index_upgrade(
+                    manifest, chroma, embedder, clip=True, ocr=False
+                )
+                pending_clip = manifest.get_pending_clip(source_id)
+            if pending_clip:
+                self._set_phase("clip", "Visual indexing…", len(pending_clip))
+                done = 0
 
-            def clip_progress(batch_done: int, batch_total: int) -> None:
-                nonlocal done
-                done = min(done + batch_done, batch_total)
-                self._set_progress(done, batch_total)
+                def clip_progress(batch_done: int, batch_total: int) -> None:
+                    nonlocal done
+                    done = min(done + batch_done, batch_total)
+                    self._set_progress(done, batch_total)
 
-            run_clip_phase(
-                manifest,
-                chroma,
-                embedder,
-                records=pending_clip,
-                root=root,
-                progress_callback=clip_progress,
-            )
+                run_clip_phase(
+                    manifest,
+                    chroma,
+                    embedder,
+                    records=pending_clip,
+                    root=root,
+                    progress_callback=clip_progress,
+                )
+            else:
+                self._set_phase("clip", "Visual indexing…", 1)
+                self._set_progress(1, 1)
         else:
             self._set_phase("clip", "Visual indexing…", 1)
             self._set_progress(1, 1)
@@ -217,6 +260,8 @@ class IndexJobService:
         if self._cancel.is_set():
             return
 
+        if manifest.has_stale_ocr_engine():
+            prepare_index_upgrade(manifest, chroma, clip=False, ocr=True)
         pending_ocr = manifest.get_pending_ocr(source_id)
         if pending_ocr:
             self._set_phase("ocr", "Reading text…", len(pending_ocr))

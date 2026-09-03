@@ -44,7 +44,11 @@ def device_label(device: str) -> str:
 
 
 def ocr_use_gpu() -> bool:
-    """EasyOCR GPU path is CUDA-only; Mac MPS is not used for OCR."""
+    """Prefer CUDA for RapidOCR when Torch sees an NVIDIA GPU.
+
+    Actual ONNX Runtime CUDA support is checked at OCR init time — install
+    onnxruntime-gpu (not the CPU-only onnxruntime package).
+    """
     return torch.cuda.is_available()
 
 
@@ -52,10 +56,10 @@ def default_clip_batch_size(device: str | None = None) -> int:
     """Conservative batch sizes to reduce OOM on MPS and CPU."""
     dev = device or resolve_torch_device()
     if dev == "cuda":
-        return 32
-    if dev == "mps":
         return 16
-    return 8
+    if dev == "mps":
+        return 8
+    return 4
 
 
 def configure_mps_fallback() -> None:

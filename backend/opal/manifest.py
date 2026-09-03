@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Literal
 
-from opal.config import CLIP_MODEL, IMAGE_FOLDER, MANIFEST_PATH, ensure_dirs
+from opal.config import CLIP_MODEL, IMAGE_FOLDER, MANIFEST_PATH, OCR_ENGINE, ensure_dirs
 from opal.scanner import ScannedFile, with_content_hash
 from opal.sources import (
     DEFAULT_SOURCE_ID,
@@ -72,6 +72,7 @@ class PhotoRecord:
     error_msg: str | None
     duplicate_of: str | None
     exif_date: str | None
+    ocr_engine: str = ""
     width: int | None = None
     height: int | None = None
 
@@ -128,6 +129,12 @@ class Manifest:
             self._migrate_search_history(conn)
             self._migrate_sources(conn)
             self._migrate_dimensions(conn)
+            self._migrate_ocr_engine(conn)
+
+    def _migrate_ocr_engine(self, conn: sqlite3.Connection) -> None:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(photos)")}
+        if "ocr_engine" not in cols:
+            conn.execute("ALTER TABLE photos ADD COLUMN ocr_engine TEXT DEFAULT ''")
 
     def _migrate_dimensions(self, conn: sqlite3.Connection) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(photos)")}
@@ -436,6 +443,7 @@ class Manifest:
             ocr_text=row["ocr_text"] or "",
             has_text=bool(row["has_text"]),
             clip_model=row["clip_model"] or "",
+            ocr_engine=(row["ocr_engine"] or "") if "ocr_engine" in keys else "",
             indexed_at=row["indexed_at"],
             status=row["status"],
             error_msg=row["error_msg"],
@@ -505,6 +513,8 @@ class Manifest:
         return row is not None
 
     def record_in_active_library(self, record: PhotoRecord) -> bool:
+        if record.status == STATUS_MISSING:
+            return False
         return self.is_source_active(record.source_id)
 
     def get_all_rel_paths(self, source_id: str | None = None) -> set[str]:
@@ -955,6 +965,7 @@ class Manifest:
                     ocr_text=canonical.ocr_text,
                     has_text=canonical.has_text,
                     clip_model=canonical.clip_model,
+                    ocr_engine=canonical.ocr_engine,
                     indexed_at=canonical.indexed_at,
                     status=canonical.status,
                     error_msg=None,
@@ -988,6 +999,44 @@ class Manifest:
             needs_reindex = True
             self._insert(record)
             return record, needs_reindex, stale_chroma_id, False
+
+        # File was deleted earlier and is back on disk — re-index from scratch.
+        if existing.status == STATUS_MISSING:
+            scanned = with_content_hash(scanned)
+            canonical = self.get_canonical_by_content_hash(scanned.content_hash)
+            if canonical and canonical.id != existing.id:
+                with self._connect() as conn:
+                    conn.execute(
+                        """
+                        UPDATE photos SET
+                            file_size = ?, mtime = ?, content_hash = ?,
+                            ocr_text = ?, has_text = ?, clip_model = ?,
+                            ocr_engine = ?, indexed_at = ?, status = ?,
+                            error_msg = NULL, duplicate_of = ?, exif_date = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            scanned.file_size,
+                            scanned.mtime,
+                            scanned.content_hash,
+                            canonical.ocr_text,
+                            int(canonical.has_text),
+                            canonical.clip_model,
+                            canonical.ocr_engine,
+                            canonical.indexed_at,
+                            canonical.status,
+                            canonical.id,
+                            canonical.exif_date,
+                            file_id,
+                        ),
+                    )
+                existing = self.get_by_rel_path(scanned.rel_path, source_id=source_id)
+                assert existing is not None
+                return existing, False, None, True
+            self.revive_missing(file_id, scanned)
+            existing = self.get_by_rel_path(scanned.rel_path, source_id=source_id)
+            assert existing is not None
+            return existing, True, None, False
 
         if existing.file_size != scanned.file_size or existing.mtime != scanned.mtime:
             scanned = with_content_hash(scanned)
@@ -1037,7 +1086,7 @@ class Manifest:
                 UPDATE photos SET
                     file_size = ?, mtime = ?, content_hash = ?,
                     ocr_text = '', has_text = 0, clip_model = '',
-                    indexed_at = NULL, status = ?, error_msg = NULL,
+                    ocr_engine = '', indexed_at = NULL, status = ?, error_msg = NULL,
                     duplicate_of = NULL, exif_date = NULL
                 WHERE id = ?
                 """,
@@ -1091,7 +1140,7 @@ class Manifest:
             """
             UPDATE photos SET
                 status = ?, clip_model = ?, indexed_at = ?,
-                ocr_text = ?, has_text = ?, exif_date = ?
+                ocr_text = ?, has_text = ?, exif_date = ?, ocr_engine = ?
             WHERE content_hash = ? AND id != ?
             """,
             (
@@ -1101,10 +1150,99 @@ class Manifest:
                 canonical["ocr_text"],
                 canonical["has_text"],
                 canonical["exif_date"],
+                canonical["ocr_engine"] if "ocr_engine" in canonical.keys() else "",
                 content_hash,
                 canonical["id"],
             ),
         )
+
+    def prepare_clip_upgrade(self, *, chroma_recreated: bool) -> int:
+        """Re-queue photos for embedding when the visual model changed."""
+        with self._connect() as conn:
+            if chroma_recreated:
+                cursor = conn.execute(
+                    """
+                    UPDATE photos
+                    SET status = ?, error_msg = NULL
+                    WHERE duplicate_of IS NULL
+                      AND status IN (?, ?, ?)
+                    """,
+                    (
+                        STATUS_PENDING,
+                        STATUS_INDEXED,
+                        STATUS_OCR_DONE,
+                        STATUS_CLIP_DONE,
+                    ),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE photos
+                    SET status = ?, error_msg = NULL
+                    WHERE duplicate_of IS NULL
+                      AND status IN (?, ?, ?)
+                      AND (clip_model IS NULL OR clip_model = '' OR clip_model != ?)
+                    """,
+                    (
+                        STATUS_PENDING,
+                        STATUS_INDEXED,
+                        STATUS_OCR_DONE,
+                        STATUS_CLIP_DONE,
+                        CLIP_MODEL,
+                    ),
+                )
+        count = cursor.rowcount
+        if count:
+            logger.info("Re-queued %d photos for visual re-index", count)
+        return count
+
+    def has_stale_clip_model(self) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM photos
+                WHERE duplicate_of IS NULL
+                  AND status IN (?, ?, ?)
+                  AND (clip_model IS NULL OR clip_model = '' OR clip_model != ?)
+                LIMIT 1
+                """,
+                (STATUS_INDEXED, STATUS_OCR_DONE, STATUS_CLIP_DONE, CLIP_MODEL),
+            ).fetchone()
+        return row is not None
+
+    def has_stale_ocr_engine(self) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1 FROM photos
+                WHERE duplicate_of IS NULL
+                  AND status = ?
+                  AND clip_model = ?
+                  AND (ocr_engine IS NULL OR ocr_engine = '' OR ocr_engine != ?)
+                LIMIT 1
+                """,
+                (STATUS_INDEXED, CLIP_MODEL, OCR_ENGINE),
+            ).fetchone()
+        return row is not None
+
+    def prepare_ocr_upgrade(self) -> int:
+        """Re-queue indexed photos when the OCR engine changed."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE photos
+                SET status = ?, error_msg = NULL
+                WHERE duplicate_of IS NULL
+                  AND status = ?
+                  AND clip_model = ?
+                  AND (ocr_engine IS NULL OR ocr_engine = '' OR ocr_engine != ?)
+                """,
+                (STATUS_CLIP_DONE, STATUS_INDEXED, CLIP_MODEL, OCR_ENGINE),
+            )
+        count = cursor.rowcount
+        if count:
+            logger.info("Re-queued %d photos for OCR re-index", count)
+        return count
 
     def mark_clip_done(self, photo_id: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -1136,10 +1274,10 @@ class Manifest:
                 UPDATE photos SET
                     ocr_text = ?, has_text = ?, status = ?,
                     indexed_at = ?, exif_date = COALESCE(?, exif_date),
-                    error_msg = NULL
+                    ocr_engine = ?, error_msg = NULL
                 WHERE id = ?
                 """,
-                (ocr_text, int(has_text), STATUS_INDEXED, now, exif_date, photo_id),
+                (ocr_text, int(has_text), STATUS_INDEXED, now, exif_date, OCR_ENGINE, photo_id),
             )
             if row:
                 self._sync_status_for_content_hash(row["content_hash"], conn)
@@ -1158,21 +1296,71 @@ class Manifest:
                 (duplicate_of, photo_id),
             )
 
-    def mark_missing(self, rel_paths: set[str], source_id: str | None = None) -> int:
+    def mark_missing(self, rel_paths: set[str], source_id: str | None = None) -> list[PhotoRecord]:
+        """Mark paths missing. Returns the records that transitioned to missing."""
         if not rel_paths:
-            return 0
+            return []
         placeholders = ",".join("?" * len(rel_paths))
-        params: list = [STATUS_MISSING, *rel_paths, STATUS_MISSING]
-        query = (
-            f"UPDATE photos SET status = ? WHERE rel_path IN ({placeholders}) "
-            f"AND status != ?"
+        params: list = [*rel_paths, STATUS_MISSING]
+        select = (
+            f"SELECT * FROM photos WHERE rel_path IN ({placeholders}) AND status != ?"
         )
         if source_id:
-            query += " AND source_id = ?"
+            select += " AND source_id = ?"
             params.append(source_id)
         with self._connect() as conn:
-            cursor = conn.execute(query, params)
-            return cursor.rowcount
+            rows = conn.execute(select, params).fetchall()
+            records = [self._row_to_record(r) for r in rows]
+            if not records:
+                return []
+            ids = [r.id for r in records]
+            id_placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE photos SET status = ? WHERE id IN ({id_placeholders})",
+                (STATUS_MISSING, *ids),
+            )
+        return records
+
+    def orphaned_content_hashes(self, content_hashes: list[str]) -> list[str]:
+        """Content hashes with no remaining non-missing photos (safe to drop from Chroma)."""
+        orphaned: list[str] = []
+        seen: set[str] = set()
+        with self._connect() as conn:
+            for content_hash in content_hashes:
+                if not content_hash or content_hash in seen:
+                    continue
+                seen.add(content_hash)
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt FROM photos
+                    WHERE content_hash = ? AND status != ?
+                    """,
+                    (content_hash, STATUS_MISSING),
+                ).fetchone()
+                if row and row["cnt"] == 0:
+                    orphaned.append(content_hash)
+        return orphaned
+
+    def revive_missing(self, photo_id: str, scanned: ScannedFile) -> None:
+        """Bring a previously missing file back as pending re-index."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE photos SET
+                    file_size = ?, mtime = ?, content_hash = ?,
+                    ocr_text = '', has_text = 0, clip_model = '',
+                    ocr_engine = '', indexed_at = NULL, status = ?,
+                    error_msg = NULL, duplicate_of = NULL, exif_date = NULL
+                WHERE id = ?
+                """,
+                (
+                    scanned.file_size,
+                    scanned.mtime,
+                    scanned.content_hash,
+                    STATUS_PENDING,
+                    photo_id,
+                ),
+            )
 
     def get_pending_clip(self, source_id: str | None = None) -> list[PhotoRecord]:
         with self._connect() as conn:

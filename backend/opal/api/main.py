@@ -2,6 +2,7 @@
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,6 +38,7 @@ from opal.api.schemas import (
 )
 from opal.config import CLIP_BATCH_SIZE, IMAGE_FOLDER, setup_logging
 from opal.device import device_label, resolve_torch_device
+from opal.folder_watcher import get_folder_watcher
 from opal.index_service import get_index_service
 from opal.manifest import path_id
 from opal.search import MatchLevel, execute_search, merge_plan, parse_search
@@ -53,7 +55,18 @@ logger.info(
     CLIP_BATCH_SIZE,
 )
 
-app = FastAPI(title="Opal Gallery API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    watcher = get_folder_watcher()
+    watcher.start()
+    try:
+        yield
+    finally:
+        watcher.stop()
+
+
+app = FastAPI(title="Opal Gallery API", version="1.0.0", lifespan=lifespan)
 
 _cors_origins = [
     "http://localhost:5173",
@@ -150,7 +163,8 @@ def create_source(body: SourceCreateRequest):
         source = manifest.add_or_restore_source(body.path, body.name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    get_index_service().start(get_manifest(), get_chroma(), source.id)
+    get_index_service().request(get_manifest(), get_chroma(), source.id)
+    get_folder_watcher().refresh()
     return SourceSummary(
         id=source.id,
         name=source.name,
@@ -172,6 +186,7 @@ def update_source(source_id: str, body: SourceUpdateRequest):
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Source not found")
+    get_folder_watcher().refresh()
     return SourceSummary(
         id=updated.id,
         name=updated.name,
@@ -190,6 +205,7 @@ def delete_source(source_id: str):
     manifest = get_manifest()
     if not manifest.soft_remove_source(source_id):
         raise HTTPException(status_code=404, detail="Source not found")
+    get_folder_watcher().refresh()
     return {"status": "ok"}
 
 
@@ -199,9 +215,10 @@ def scan_source(source_id: str):
     source = manifest.get_source(source_id)
     if not source or not source.enabled:
         raise HTTPException(status_code=404, detail="Source not found")
-    started = get_index_service().start(get_manifest(), get_chroma(), source_id)
+    started = get_index_service().request(get_manifest(), get_chroma(), source_id)
     if not started:
-        raise HTTPException(status_code=409, detail="Index job already running")
+        # Queued behind an in-flight job — still OK for the client
+        return {"status": "queued"}
     return {"status": "started"}
 
 
@@ -213,9 +230,9 @@ def index_status():
 
 @app.post("/api/index/start")
 def index_start(source_id: str | None = Query(None)):
-    started = get_index_service().start(get_manifest(), get_chroma(), source_id)
+    started = get_index_service().request(get_manifest(), get_chroma(), source_id)
     if not started:
-        raise HTTPException(status_code=409, detail="Index job already running")
+        return {"status": "queued"}
     return {"status": "started"}
 
 

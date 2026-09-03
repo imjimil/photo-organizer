@@ -1,6 +1,9 @@
 """OCR worker with manifest-backed caching."""
 
+from __future__ import annotations
+
 import logging
+import os
 from pathlib import Path
 
 from opal.config import IMAGE_FOLDER, OCR_LANGUAGES
@@ -10,23 +13,78 @@ from opal.manifest import Manifest, PhotoRecord
 logger = logging.getLogger("photo_organizer.ocr_worker")
 
 _reader = None
+_path_bootstrapped = False
+
+
+def _ensure_torch_cuda_dlls() -> None:
+    """Put Torch's CUDA DLLs on PATH so onnxruntime-gpu can load them (Windows)."""
+    global _path_bootstrapped
+    if _path_bootstrapped:
+        return
+    _path_bootstrapped = True
+    try:
+        import torch
+
+        torch_lib = Path(torch.__file__).resolve().parent / "lib"
+        if torch_lib.is_dir():
+            current = os.environ.get("PATH", "")
+            prefix = str(torch_lib)
+            if prefix.lower() not in current.lower():
+                os.environ["PATH"] = prefix + os.pathsep + current
+                logger.debug("Prepended Torch CUDA libs to PATH: %s", torch_lib)
+    except Exception as exc:
+        logger.debug("Could not bootstrap Torch CUDA PATH: %s", exc)
+
+
+def _onnx_providers() -> list[str]:
+    _ensure_torch_cuda_dlls()
+    try:
+        import onnxruntime as ort
+
+        return list(ort.get_available_providers())
+    except Exception:
+        return []
 
 
 def _get_reader():
     global _reader
     if _reader is None:
-        import easyocr
+        from rapidocr import RapidOCR
 
-        gpu = ocr_use_gpu()
+        want_gpu = ocr_use_gpu()
         torch_device = resolve_torch_device()
-        if gpu:
-            logger.info("Initializing EasyOCR (gpu=True, %s)", device_label(torch_device))
-        else:
+        providers = _onnx_providers()
+        cuda_listed = "CUDAExecutionProvider" in providers
+        params: dict = {}
+
+        if want_gpu and cuda_listed:
+            params["EngineConfig.onnxruntime.use_cuda"] = True
             logger.info(
-                "Initializing EasyOCR (gpu=False, %s — OCR uses CPU on this platform)",
+                "Initializing RapidOCR / PaddleOCR (CUDA, %s) providers=%s",
+                device_label(torch_device),
+                providers,
+            )
+        elif want_gpu and not cuda_listed:
+            logger.warning(
+                "Torch CUDA is available but onnxruntime has no CUDAExecutionProvider "
+                "(providers=%s). Install onnxruntime-gpu==1.20.2 (CUDA 12) and "
+                "uninstall the CPU-only onnxruntime package. Falling back to CPU OCR.",
+                providers,
+            )
+            logger.info(
+                "Initializing RapidOCR / PaddleOCR (CPU fallback, %s)",
                 device_label(torch_device),
             )
-        _reader = easyocr.Reader(OCR_LANGUAGES, gpu=gpu)
+        else:
+            logger.info(
+                "Initializing RapidOCR / PaddleOCR (CPU, %s) providers=%s",
+                device_label(torch_device),
+                providers,
+            )
+
+        _reader = RapidOCR(params=params) if params else RapidOCR()
+        if OCR_LANGUAGES != ["en"]:
+            logger.info("OCR languages configured: %s", ",".join(OCR_LANGUAGES))
     return _reader
 
 
@@ -53,8 +111,10 @@ def extract_exif_date(image_path: Path) -> str | None:
 def run_ocr(image_path: Path) -> str:
     """Run OCR on a single image and return extracted text."""
     reader = _get_reader()
-    result = reader.readtext(str(image_path), detail=0)
-    return " ".join(result)
+    result = reader(str(image_path))
+    if result is None or not result.txts:
+        return ""
+    return " ".join(result.txts)
 
 
 def process_ocr_batch(

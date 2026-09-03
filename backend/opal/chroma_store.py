@@ -20,6 +20,41 @@ class ChromaStore:
             metadata={"hnsw:space": "cosine"},
         )
 
+    def embedding_model_matches(self, embed_model: str) -> bool:
+        meta = dict(self.collection.metadata or {})
+        return meta.get("embed_model") == embed_model
+
+    def ensure_embedding_collection(self, embed_model: str, embed_dim: int) -> bool:
+        """Recreate the collection when the embedding model or dimension changes."""
+        meta = dict(self.collection.metadata or {})
+        current_model = meta.get("embed_model")
+        current_dim = meta.get("embed_dim")
+        if current_dim is not None:
+            current_dim = int(current_dim)
+        if current_model == embed_model and current_dim == embed_dim:
+            return False
+
+        logger.warning(
+            "Embedding index changed (%s %sd -> %s %sd); recreating Chroma collection",
+            current_model,
+            current_dim,
+            embed_model,
+            embed_dim,
+        )
+        try:
+            self.client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = self.client.create_collection(
+            name=self.collection_name,
+            metadata={
+                "hnsw:space": "cosine",
+                "embed_model": embed_model,
+                "embed_dim": embed_dim,
+            },
+        )
+        return True
+
     def upsert_batch(
         self,
         ids: list[str],

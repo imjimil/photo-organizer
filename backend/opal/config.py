@@ -18,10 +18,11 @@ THUMB_CACHE_PATH = Path(os.getenv("THUMB_CACHE_PATH", "./.cache/thumbs"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "quotes_collection")
 
 # Models
-CLIP_MODEL = os.getenv("CLIP_MODEL", "openai/clip-vit-base-patch32")
+CLIP_MODEL = os.getenv("CLIP_MODEL", "google/siglip2-base-patch16-256")
+OCR_ENGINE = os.getenv("OCR_ENGINE", "rapidocr")
 OCR_LANGUAGES = os.getenv("OCR_LANGUAGES", "en").split(",")
 
-# Batch sizes (CLIP default scales with GPU: cuda=32, mps=16, cpu=8)
+# Batch sizes (SigLIP default scales with GPU: cuda=16, mps=8, cpu=4)
 _clip_batch_env = os.getenv("CLIP_BATCH_SIZE")
 CLIP_BATCH_SIZE = (
     int(_clip_batch_env)
@@ -36,6 +37,15 @@ THUMB_SIZE = int(os.getenv("THUMB_SIZE", "256"))
 
 # Image extensions
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+
+# Auto-index when files appear/change/disappear under source folders
+FOLDER_WATCH = os.getenv("FOLDER_WATCH", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+FOLDER_WATCH_DEBOUNCE_SEC = float(os.getenv("FOLDER_WATCH_DEBOUNCE_SEC", "2.5"))
 
 # Duplicate detection
 DUPLICATE_THRESHOLD = float(os.getenv("DUPLICATE_THRESHOLD", "0.95"))
