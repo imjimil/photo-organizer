@@ -2,7 +2,6 @@ import type { AppView } from './EdgeRail'
 import {
   IconNavCollections,
   IconNavDiscover,
-  IconNavHome,
   IconNavLibrary,
   IconNavSearch,
 } from './NavIcons'
@@ -19,23 +18,21 @@ const TABS: {
   shortLabel: string
   Icon: typeof IconNavLibrary
 }[] = [
-  { id: 'home', label: 'Home', shortLabel: 'Home', Icon: IconNavHome },
+  { id: 'search', label: 'Search', shortLabel: 'Search', Icon: IconNavSearch },
   { id: 'library', label: 'Library', shortLabel: 'Library', Icon: IconNavLibrary },
   { id: 'collections', label: 'Collections', shortLabel: 'Albums', Icon: IconNavCollections },
   { id: 'discover', label: 'Discover', shortLabel: 'Discover', Icon: IconNavDiscover },
-  { id: 'search', label: 'Search', shortLabel: 'Search', Icon: IconNavSearch },
 ]
 
-const VIEW_INDEX: Partial<Record<AppView, number>> = {
-  home: 0,
+const VIEW_INDEX: Record<AppView, number> = {
+  search: 0,
   library: 1,
   collections: 2,
   discover: 3,
-  search: 4,
 }
 
 export function NavPill({ view, onViewChange, className = '' }: NavPillProps) {
-  const index = VIEW_INDEX[view] ?? -1
+  const index = VIEW_INDEX[view] ?? 0
   const isMobile = className.includes('nav-pill-float')
 
   return (
@@ -44,13 +41,11 @@ export function NavPill({ view, onViewChange, className = '' }: NavPillProps) {
       role="navigation"
       aria-label="Main navigation"
     >
-      {index >= 0 && (
-        <span
-          className="nav-pill-indicator nav-pill-indicator-5"
-          style={{ '--nav-index': index } as React.CSSProperties}
-          aria-hidden
-        />
-      )}
+      <span
+        className="nav-pill-indicator nav-pill-indicator-5"
+        style={{ '--nav-index': index } as React.CSSProperties}
+        aria-hidden
+      />
       {TABS.map((tab) => {
         const active = view === tab.id
         return (

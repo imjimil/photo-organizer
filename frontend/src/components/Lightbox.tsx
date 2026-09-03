@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   exportUrl,
   getFavoriteStatus,
@@ -230,10 +231,29 @@ export function Lightbox({
       ? `${index + 1} / ${imageIds.length.toLocaleString()}`
       : '—'
 
-  return (
+  const iconBtn = (
+    label: string,
+    onClick: () => void,
+    icon: ReactNode,
+    extra?: { active?: boolean; disabled?: boolean },
+  ) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={extra?.disabled}
+      title={label}
+      aria-label={label}
+      className={`viewer-icon-btn ${extra?.active ? 'viewer-icon-btn-active' : ''}`}
+      {...(extra?.active !== undefined ? { 'aria-pressed': extra.active } : {})}
+    >
+      {icon}
+    </button>
+  )
+
+  const viewer = (
     <div
       ref={dialogRef}
-      className="viewer-scrim fixed inset-0 z-50 flex flex-col"
+      className="viewer-scrim fixed inset-0 z-[80] flex flex-col"
       role="dialog"
       aria-modal="true"
       aria-label="Image viewer"
@@ -243,70 +263,37 @@ export function Lightbox({
           type="button"
           data-viewer-close
           onClick={onClose}
-          className="viewer-bar-btn"
+          className="viewer-close-btn"
           aria-label="Close"
         >
           <IconClose className="h-[1.125rem] w-[1.125rem]" />
-          <span className="hidden sm:inline">Back</span>
+          Close
         </button>
         <p className="viewer-counter">{counter}</p>
-        <div className="viewer-bar-actions hidden md:flex">
-          {hasQuote && (
-            <button type="button" onClick={copyQuote} className="viewer-bar-btn" aria-label="Copy text">
-              <IconCopy className="h-[1.125rem] w-[1.125rem]" />
-              Copy
-            </button>
+        <div className="viewer-actions hidden md:flex" role="toolbar" aria-label="Image actions">
+          {hasQuote && iconBtn('Copy text', copyQuote, <IconCopy className="h-4 w-4" />)}
+          {iconBtn(
+            favorited ? 'Remove from Favorites' : 'Add to Favorites',
+            handleToggleFavorite,
+            <IconStar className="h-4 w-4" filled={favorited} />,
+            { active: favorited, disabled: favoriteBusy },
           )}
-          <button
-            type="button"
-            onClick={handleToggleFavorite}
-            disabled={favoriteBusy}
-            className={`viewer-bar-btn ${favorited ? 'viewer-bar-btn-active' : ''}`}
-            aria-label={favorited ? 'Remove from Favorites' : 'Add to Favorites'}
-            aria-pressed={favorited}
-          >
-            <IconStar className="h-[1.125rem] w-[1.125rem]" filled={favorited} />
-            Favorite
-          </button>
-          <button
-            type="button"
-            onClick={() => setAlbumPickerOpen(true)}
-            className={`viewer-bar-btn ${albumPickerOpen ? 'viewer-bar-btn-active' : ''}`}
-            aria-label="Add to album"
-          >
-            <IconAlbum className="h-[1.125rem] w-[1.125rem]" />
-            Album
-          </button>
-          <button type="button" onClick={saveImage} className="viewer-bar-btn" aria-label="Save image">
-            <IconDownload className="h-[1.125rem] w-[1.125rem]" />
-            Save
-          </button>
-          {isDesktop && (
-            <button type="button" onClick={revealInExplorer} className="viewer-bar-btn" aria-label="Reveal in Explorer">
-              <IconFolder className="h-[1.125rem] w-[1.125rem]" />
-              Reveal
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setRelatedOpen((v) => !v)}
-            disabled={similar.length === 0}
-            className={`viewer-bar-btn ${relatedOpen ? 'viewer-bar-btn-active' : ''}`}
-            aria-label="Related images"
-            aria-pressed={relatedOpen}
-          >
-            <IconRelated className="h-[1.125rem] w-[1.125rem]" />
-            Related
-          </button>
-          <button type="button" onClick={shareImage} className="viewer-bar-btn" aria-label="Share">
-            <IconShare className="h-[1.125rem] w-[1.125rem]" />
-            Share
-          </button>
+          {iconBtn('Add to album', () => setAlbumPickerOpen(true), <IconAlbum className="h-4 w-4" />, {
+            active: albumPickerOpen,
+          })}
+          {iconBtn('Save image', saveImage, <IconDownload className="h-4 w-4" />)}
+          {isDesktop &&
+            iconBtn('Reveal in Explorer', revealInExplorer, <IconFolder className="h-4 w-4" />)}
+          {iconBtn('Related images', () => setRelatedOpen((v) => !v), <IconRelated className="h-4 w-4" />, {
+            active: relatedOpen,
+            disabled: similar.length === 0,
+          })}
+          {iconBtn('Share', shareImage, <IconShare className="h-4 w-4" />)}
         </div>
       </header>
 
       <div
-        className="relative min-h-0 flex-1"
+        className="viewer-stage"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
@@ -351,7 +338,7 @@ export function Lightbox({
                 src={mediaUrl(detail.id)}
                 alt={imageAltText(detail)}
                 draggable={false}
-                className="viewer-float max-h-[72dvh] max-w-full object-contain will-change-transform md:max-h-[82dvh]"
+                className="viewer-float viewer-photo"
                 style={{ transform: 'translate3d(0,0,0) scale(1)' }}
               />
             ) : (
@@ -456,7 +443,7 @@ export function Lightbox({
             <button
               type="button"
               onClick={() => setRelatedOpen(false)}
-              className="viewer-bar-btn"
+              className="viewer-close-btn"
               aria-label="Close related"
             >
               <IconClose className="h-[1.125rem] w-[1.125rem]" />
@@ -482,6 +469,8 @@ export function Lightbox({
       )}
     </div>
   )
+
+  return createPortal(viewer, document.body)
 }
 
 function ToolbarButton({

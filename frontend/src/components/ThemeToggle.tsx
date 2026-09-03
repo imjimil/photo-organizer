@@ -22,7 +22,7 @@ export function ThemeToggle({ mode, onCycle, compact }: ThemeToggleProps) {
     >
       <ThemeIcon mode={mode} />
       {!compact && (
-        <span className="type-eyebrow !text-[0.625rem]">{labels[mode]}</span>
+        <span className="type-meta">{labels[mode]}</span>
       )}
     </button>
   )

@@ -21,7 +21,7 @@ export function LibraryToolbar({
     <div className="library-toolbar hidden md:flex">
       <div className="library-toolbar-intro">
         <h1 className="page-intro-title text-text-primary">Library</h1>
-        <span className="type-caption tabular-nums">{total.toLocaleString()} saved</span>
+        <span className="type-caption tabular-nums">{total.toLocaleString()} photos</span>
       </div>
       {sourcesLabel && onOpenSources && (
         <button type="button" className="library-toolbar-link" onClick={onOpenSources}>

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createAlbum,
-  discover,
   getAlbums,
   getCollections,
   getStats,
   isDesktopShell,
   reorderAlbums,
   search,
+  thumbUrl,
   type AlbumSummary,
   type CollectionSummary,
   type SearchPlanSummary,
@@ -30,7 +30,6 @@ import { PhotoGrid } from './components/PhotoGrid'
 import { SearchView } from './components/SearchView'
 import { SelectionBar } from './components/SelectionBar'
 import { EdgeRail, type AppView } from './components/EdgeRail'
-import { HomeBento } from './components/HomeBento'
 import { LibraryToolbar } from './components/LibraryToolbar'
 import { MobileHeader } from './components/MobileHeader'
 import { Titlebar } from './components/Titlebar'
@@ -67,8 +66,7 @@ export default function App() {
   const searchAbortRef = useRef<AbortController | null>(null)
   const { items: searchHistory, record: recordSearchHistory, clear: clearSearchHistory } =
     useSearchHistory()
-  const [view, setView] = useState<AppView>('home')
-  const [discoverCover, setDiscoverCover] = useState<import('./api/client').ImageSummary | null>(null)
+  const [view, setView] = useState<AppView>('search')
   const [collectionScope, setCollectionScope] = useState<CollectionScope>(defaultCollectionScope)
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebouncedValue(query, 400)
@@ -185,9 +183,6 @@ export default function App() {
       .then((r) => setCollections(r.collections))
       .catch(() => {})
     refreshAlbums()
-    discover(1)
-      .then((r) => setDiscoverCover(r.items[0] ?? null))
-      .catch(() => {})
   }, [refreshAlbums, toast])
 
   useEffect(() => {
@@ -470,7 +465,6 @@ export default function App() {
       <a href="#main-content" className="skip-link">
         Skip to content
       </a>
-      <div className="ambient-wash" aria-hidden />
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {searchStatus}
       </p>
@@ -512,36 +506,11 @@ export default function App() {
           />
         )}
 
-        {view === 'home' && (
-          <div key="home" className="view-enter flex flex-1 flex-col">
-            <main
-              id="main-content"
-              className="mx-auto w-full max-w-[1680px] flex-1 px-4 pb-8 pt-4 md:px-8 md:pb-12 md:pt-6"
-            >
-              <HomeBento
-                total={statsTotal || libraryTotal}
-                recent={libraryItems.slice(0, 24)}
-                collections={collections}
-                discoverCover={discoverCover}
-                onOpenPhoto={setSelectedId}
-                onOpenCollection={handleOpenFolder}
-                onShuffle={() => {
-                  setFeedSort('random')
-                  setView('library')
-                }}
-                onDiscover={() => setView('discover')}
-                onOpenLibrary={() => setView('library')}
-                onSearch={() => setView('search')}
-              />
-            </main>
-          </div>
-        )}
-
         {view === 'library' && (
           <div key="library" className="view-enter flex flex-1 flex-col">
             {selectHint.visible && !selectionMode && libraryItems.length > 0 && (
               <ContextHint onDismiss={selectHint.dismiss} label="Selection tip">
-                Tap <strong>Select</strong> to choose photos, or long-press a tile. Drag across the grid to select many at once.
+                Use <strong>Select</strong> to choose photos. Drag across the grid to select many at once.
               </ContextHint>
             )}
             {selectionMode && (
@@ -564,7 +533,7 @@ export default function App() {
             )}
             <main
               id="main-content"
-              className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 md:px-6 md:pb-12"
+              className="canvas-main canvas-main-pad"
               onClick={handleGridMainClick}
             >
               <LibraryToolbar
@@ -638,8 +607,8 @@ export default function App() {
             )}
             <main
               id="main-content"
-              className={`mx-auto w-full max-w-[1680px] flex-1 pb-8 md:pb-12 ${
-                inCollectionDetail ? 'px-2 md:px-6' : 'px-4 md:px-8'
+              className={`canvas-main canvas-main-pad ${
+                inCollectionDetail ? '' : 'pt-4 md:pt-5'
               }`}
               onClick={inCollectionDetail ? handleGridMainClick : undefined}
             >
@@ -656,9 +625,9 @@ export default function App() {
                   onReorderAlbums={handleReorderAlbums}
                 />
               ) : emptyCollection ? (
-                <p className="type-quote mx-auto max-w-md px-4 py-20 text-center text-text-muted">
-                  {emptyCollectionMessage}
-                </p>
+                <div className="search-empty">
+                  <h2 className="type-heading text-text-primary">{emptyCollectionMessage}</h2>
+                </div>
               ) : (
                 <PhotoGrid
                   items={collectionItems}
@@ -723,16 +692,50 @@ export default function App() {
               onClearHistory={clearSearchHistory}
               searchPartial={searchPartial}
             />
-            <main id="main-content" className="mx-auto w-full max-w-[1680px] flex-1 px-2 pb-8 pt-1 md:px-6">
+            <main id="main-content" className="canvas-main canvas-main-pad pt-1">
               {!searching && !searchPending && searchResults.length === 0 && searchActive && (
-                <p className="type-caption mx-auto max-w-md px-4 py-12 text-center text-text-muted">
-                  Nothing matched. Try Broad match, fewer filters, or different words.
-                </p>
+                <div className="search-empty">
+                  <h2 className="type-heading text-text-primary">No matches</h2>
+                  <p className="type-caption">
+                    Try Broad match, drop a filter, or use different words.
+                  </p>
+                </div>
               )}
               {!searching && !searchPending && searchResults.length === 0 && !searchActive && (
-                <p className="type-caption mx-auto max-w-sm px-4 py-10 text-center text-text-faint">
-                  Search by mood, exact quotes, or tap the filter icon
-                </p>
+                <div className="search-landing">
+                  <div className="search-empty">
+                    <h2 className="type-heading text-text-primary">Find anything you saved</h2>
+                    <p className="type-caption">
+                      Mood, an exact quote, a folder, or a year. Press / from anywhere.
+                    </p>
+                  </div>
+                  {libraryItems.length > 0 && (
+                    <section className="search-recent" aria-label="Recent photos">
+                      <div className="search-recent-head">
+                        <h3 className="type-meta">Recent</h3>
+                        <button
+                          type="button"
+                          className="search-meta-link"
+                          onClick={() => setView('library')}
+                        >
+                          Open library
+                        </button>
+                      </div>
+                      <div className="search-recent-grid">
+                        {libraryItems.slice(0, 16).map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="search-recent-tile"
+                            onClick={() => setSelectedId(item.id)}
+                          >
+                            <img src={thumbUrl(item.id)} alt="" loading="lazy" />
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </div>
               )}
               {searchResults.length > 0 && (
                 <PhotoGrid

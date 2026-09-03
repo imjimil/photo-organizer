@@ -28,6 +28,7 @@ node_modules/
 
 # Local desktop config
 opal.env
+.tmp-ui/
 
 # Tauri
 src-tauri/target/

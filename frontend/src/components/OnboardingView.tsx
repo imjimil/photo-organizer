@@ -28,50 +28,48 @@ export function OnboardingView({
     }
   }
 
-  if (started) {
-    return (
-      <div className="onboarding-shell">
+  return (
+    <div className="onboarding-shell">
+      <div className="onboarding-stage" aria-hidden>
+        <div className="onboarding-stage-mark" />
+      </div>
+      {started ? (
         <div className="onboarding-card">
-          <p className="type-eyebrow text-text-muted">Setting up</p>
-          <h1 className="type-quote mt-2 text-text-primary">Indexing your folder</h1>
-          <p className="type-caption mt-3 text-text-muted">
-            You can browse photos once thumbnails are ready. Search improves as visual and text
-            indexing finish.
+          <p className="type-eyebrow">Indexing</p>
+          <h1 className="type-display mt-2 text-text-primary">Building your library</h1>
+          <p className="type-caption mt-3 max-w-sm">
+            Thumbnails appear first. Search gets better as visual and text indexing finish.
           </p>
-          <div className="mt-6">
+          <div className="mt-8">
             <IndexProgressPanel status={indexStatus} />
           </div>
           {indexStatus.browse_ready > 0 && (
-            <button type="button" className="btn-primary mt-8 w-full" onClick={onDone}>
+            <button type="button" className="btn-primary mt-8 self-start" onClick={onDone}>
               Open library
             </button>
           )}
         </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="onboarding-shell">
-      <div className="onboarding-card">
-        <p className="type-eyebrow text-text-muted">Welcome to Opal</p>
-        <h1 className="type-quote mt-2 text-text-primary">Where are your images?</h1>
-        <p className="type-caption mt-3 max-w-md text-text-muted">
-          Add a folder to watch in place. Opal indexes photos for browsing and search without moving
-          your files.
-        </p>
-        <button
-          type="button"
-          className="btn-primary mt-8 w-full"
-          disabled={adding}
-          onClick={handlePick}
-        >
-          {adding ? 'Opening picker…' : 'Choose folder'}
-        </button>
-        <button type="button" className="btn-ghost mt-3 w-full" onClick={onSkip}>
-          Skip for now
-        </button>
-      </div>
+      ) : (
+        <div className="onboarding-card">
+          <p className="type-eyebrow">Opal</p>
+          <h1 className="type-display mt-2 text-text-primary">Point at a folder</h1>
+          <p className="type-caption mt-3 max-w-sm">
+            Files stay where they are. Opal indexes them in place so you can search by mood,
+            quote, or look.
+          </p>
+          <button
+            type="button"
+            className="btn-primary mt-8 self-start"
+            disabled={adding}
+            onClick={handlePick}
+          >
+            {adding ? 'Opening picker…' : 'Choose folder'}
+          </button>
+          <button type="button" className="btn-ghost mt-2 self-start" onClick={onSkip}>
+            Skip for now
+          </button>
+        </div>
+      )}
     </div>
   )
 }

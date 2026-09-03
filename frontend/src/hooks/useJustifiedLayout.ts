@@ -14,9 +14,10 @@ export interface MosaicLayout {
 }
 
 function targetRowHeight(containerWidth: number): number {
-  if (containerWidth >= 1024) return 240
-  if (containerWidth >= 640) return 200
-  return 160
+  if (containerWidth >= 1440) return 196
+  if (containerWidth >= 1024) return 176
+  if (containerWidth >= 640) return 168
+  return 148
 }
 
 export function useJustifiedLayout(
@@ -45,7 +46,7 @@ export function useJustifiedLayout(
       const result = justifiedLayout(aspectRatios, {
         containerWidth: width,
         targetRowHeight: targetRowHeight(width),
-        boxSpacing: 8,
+        boxSpacing: 4,
         containerPadding: 0,
       })
 

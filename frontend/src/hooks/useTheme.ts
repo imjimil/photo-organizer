@@ -18,7 +18,7 @@ function applyTheme(resolved: 'light' | 'dark') {
   if (meta) {
     meta.setAttribute(
       'content',
-      resolved === 'light' ? '#faf9fc' : '#1a1625',
+      resolved === 'light' ? '#f6f3ee' : '#221c16',
     )
   }
 }

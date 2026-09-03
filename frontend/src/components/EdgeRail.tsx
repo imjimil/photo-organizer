@@ -3,11 +3,11 @@ import { ThemeToggle } from './ThemeToggle'
 import {
   IconNavCollections,
   IconNavDiscover,
-  IconNavHome,
   IconNavLibrary,
+  IconNavSearch,
 } from './NavIcons'
 
-export type AppView = 'home' | 'library' | 'collections' | 'discover' | 'search'
+export type AppView = 'library' | 'collections' | 'discover' | 'search'
 
 interface EdgeRailProps {
   view: AppView
@@ -22,7 +22,7 @@ const ITEMS: {
   label: string
   Icon: typeof IconNavLibrary
 }[] = [
-  { id: 'home', label: 'Home', Icon: IconNavHome },
+  { id: 'search', label: 'Search', Icon: IconNavSearch },
   { id: 'library', label: 'Library', Icon: IconNavLibrary },
   { id: 'collections', label: 'Collections', Icon: IconNavCollections },
   { id: 'discover', label: 'Discover', Icon: IconNavDiscover },
@@ -37,7 +37,7 @@ export function EdgeRail({
 }: EdgeRailProps) {
   return (
     <nav className="edge-rail hidden md:flex" aria-label="Main">
-      <div className="edge-rail-brand" aria-hidden>
+      <div className="edge-rail-brand">
         <span className="edge-rail-wordmark">Opal</span>
       </div>
 
@@ -54,6 +54,9 @@ export function EdgeRail({
             >
               <item.Icon className="edge-rail-icon" filled={active} />
               <span className="edge-rail-label">{item.label}</span>
+              {item.id === 'search' && (
+                <kbd className="search-kbd ml-auto hidden lg:inline">/</kbd>
+              )}
             </button>
           )
         })}
@@ -78,7 +81,7 @@ export function EdgeRail({
       </div>
 
       <div className="edge-rail-footer">
-        <ThemeToggle mode={themeMode} onCycle={onThemeCycle} compact />
+        <ThemeToggle mode={themeMode} onCycle={onThemeCycle} />
       </div>
     </nav>
   )

@@ -100,7 +100,7 @@ export function SearchView({
               onChange={(e) => onQueryChange(e.target.value)}
               onFocus={() => setFocused(true)}
               onBlur={() => window.setTimeout(() => setFocused(false), 120)}
-              placeholder='Mood, "exact quote", -exclude…'
+              placeholder="Describe a photo, or quote text you remember"
               className="search-field"
               aria-label="Search your library"
             />

@@ -6,7 +6,6 @@ import type { AppView } from './EdgeRail'
 export type { AppView }
 
 const VIEW_TITLES: Record<AppView, string> = {
-  home: 'Home',
   library: 'Library',
   collections: 'Collections',
   discover: 'Discover',
@@ -46,11 +45,9 @@ export function MobileHeader({
 
   const countLabel = drillIn
     ? `${total.toLocaleString()} photos`
-    : view !== 'search' && view !== 'discover' && view !== 'home'
-      ? `${total.toLocaleString()} saved`
-      : view === 'home'
-        ? `${total.toLocaleString()} prints`
-        : null
+    : view !== 'search' && view !== 'discover'
+      ? `${total.toLocaleString()} photos`
+      : null
 
   return (
     <header className="top-rail md:hidden">

@@ -44,6 +44,9 @@ export function Titlebar() {
 
   return (
     <header className="titlebar hidden md:flex" data-tauri-drag-region>
+      <span className="titlebar-mark" data-tauri-drag-region>
+        Opal
+      </span>
       <div
         className="titlebar-drag"
         data-tauri-drag-region

@@ -310,7 +310,7 @@ export function DiscoverView({ onOpen }: DiscoverViewProps) {
   if (loading && !current) {
     return (
       <main id="main-content" className="discover-stage">
-        <p className="type-eyebrow pulse-soft text-text-muted">Finding something new</p>
+        <p className="type-eyebrow pulse-soft text-text-muted">Looking through the library</p>
       </main>
     )
   }
@@ -318,9 +318,9 @@ export function DiscoverView({ onOpen }: DiscoverViewProps) {
   return (
     <main id="main-content" className="discover-stage">
       <div className="discover-copy">
-        <p className="type-eyebrow text-text-muted">Discover</p>
-        <p className="type-quote mt-2 text-text-primary">
-          Tap, drag, or swipe for another surprise
+        <p className="type-heading text-text-primary">One at a time</p>
+        <p className="type-caption mt-2">
+          Drag or press Next. Open when you want the full image.
         </p>
       </div>
 

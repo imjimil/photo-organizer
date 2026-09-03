@@ -62,7 +62,7 @@ export function CollectionsView({
       <header className="collections-page-intro hidden md:block">
         <h1 className="page-intro-title text-text-primary">Collections</h1>
         <p className="type-caption text-text-muted mt-1">
-          Albums, libraries, and folders as stacked prints
+          Albums, libraries, and folders
         </p>
       </header>
 
