@@ -44,11 +44,7 @@ def device_label(device: str) -> str:
 
 
 def ocr_use_gpu() -> bool:
-    """Prefer CUDA for RapidOCR when Torch sees an NVIDIA GPU.
-
-    Actual ONNX Runtime CUDA support is checked at OCR init time — install
-    onnxruntime-gpu (not the CPU-only onnxruntime package).
-    """
+    """NVIDIA CUDA path for RapidOCR only. Mac uses CoreML/CPU — never CUDA."""
     return torch.cuda.is_available()
 
 

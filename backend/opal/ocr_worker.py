@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 from opal.config import IMAGE_FOLDER, OCR_LANGUAGES
@@ -22,6 +23,8 @@ def _ensure_torch_cuda_dlls() -> None:
     if _path_bootstrapped:
         return
     _path_bootstrapped = True
+    if sys.platform != "win32":
+        return
     try:
         import torch
 
@@ -51,36 +54,36 @@ def _get_reader():
     if _reader is None:
         from rapidocr import RapidOCR
 
-        want_gpu = ocr_use_gpu()
+        want_cuda = ocr_use_gpu()
         torch_device = resolve_torch_device()
         providers = _onnx_providers()
         cuda_listed = "CUDAExecutionProvider" in providers
+        coreml_listed = "CoreMLExecutionProvider" in providers
         params: dict = {}
+        accel = "CPU"
 
-        if want_gpu and cuda_listed:
+        if want_cuda and cuda_listed:
             params["EngineConfig.onnxruntime.use_cuda"] = True
+            accel = "CUDA"
+        elif want_cuda and not cuda_listed:
+            # NVIDIA Torch present but ORT-GPU missing/mismatched — quiet fallback.
             logger.info(
-                "Initializing RapidOCR / PaddleOCR (CUDA, %s) providers=%s",
-                device_label(torch_device),
-                providers,
+                "OCR using CPU (onnxruntime CUDA provider unavailable). "
+                "On Windows with an NVIDIA GPU, install onnxruntime-gpu==1.20.2."
             )
-        elif want_gpu and not cuda_listed:
-            logger.warning(
-                "Torch CUDA is available but onnxruntime has no CUDAExecutionProvider "
-                "(providers=%s). Install onnxruntime-gpu==1.20.2 (CUDA 12) and "
-                "uninstall the CPU-only onnxruntime package. Falling back to CPU OCR.",
-                providers,
-            )
-            logger.info(
-                "Initializing RapidOCR / PaddleOCR (CPU fallback, %s)",
-                device_label(torch_device),
-            )
-        else:
-            logger.info(
-                "Initializing RapidOCR / PaddleOCR (CPU, %s) providers=%s",
-                device_label(torch_device),
-                providers,
-            )
+        elif sys.platform == "darwin" and coreml_listed:
+            params["EngineConfig.onnxruntime.use_coreml"] = True
+            accel = "CoreML"
+        elif torch_device == "mps":
+            # Apple GPU accelerates SigLIP; OCR stays on CPU/CoreML (no CUDA on Mac).
+            accel = "CPU (SigLIP uses Apple Metal)"
+
+        logger.info(
+            "Initializing RapidOCR / PaddleOCR (%s, torch=%s) providers=%s",
+            accel,
+            device_label(torch_device),
+            providers or ["unknown"],
+        )
 
         _reader = RapidOCR(params=params) if params else RapidOCR()
         if OCR_LANGUAGES != ["en"]:

@@ -50,9 +50,29 @@ your image folders (unchanged)
 - **Python 3.11+**
 - **Node 18+**
 - **Rust** (only for the Tauri desktop shell)
-- GPU optional — CUDA or Apple MPS makes indexing much faster; CPU works
+- GPU optional:
+  - **Windows / Linux + NVIDIA** → CUDA (SigLIP + OCR)
+  - **Apple Silicon / Intel Mac** → Metal (MPS) for SigLIP; OCR uses CoreML/CPU (no CUDA on Mac — by design)
 
 First CLIP run downloads SigLIP weights (~350 MB). OCR models download on the first OCR pass.
+
+### macOS
+
+Works. Same setup commands. Torch auto-picks **MPS**; leave `DEVICE` unset (or set `DEVICE=mps`).
+
+```bash
+pip install -r backend/requirements.txt   # installs onnxruntime (not -gpu)
+```
+
+You will **not** get “CUDA not found” errors on Mac. Logs look like `RapidOCR … (CoreML …)` or `CPU (SigLIP uses Apple Metal)`.
+
+Desktop: Xcode CLT + Rust (`rustup`) for `npm run dev:desktop`. Browser mode (`dev:api` + `dev`) needs no Rust.
+
+Indexing on M-series is solid for CLIP; OCR is slower than NVIDIA CUDA but fine for incremental adds.
+
+### Windows + NVIDIA
+
+`requirements.txt` installs `onnxruntime-gpu` on Windows only. Prefer **1.20.x** with CUDA 12 / Torch cu121. If OCR sits at ~1 img/s, see Troubleshooting.
 
 ---
 
@@ -306,8 +326,11 @@ Run `npm run index:ocr`.
 **Add or remove files in a folder**  
 With the API running, folders are watched automatically. Drop a photo in → CLIP + OCR for that file only. Delete one → it disappears from search (after a short debounce). Disable with `FOLDER_WATCH=0`.
 
-**OCR stuck at ~1 image/sec on CUDA**  
-You likely have CPU-only `onnxruntime`, or a too-new `onnxruntime-gpu` (1.29+ wants CUDA 13 while Torch is often CUDA 12). Use `onnxruntime-gpu==1.20.2`, uninstall plain `onnxruntime`, and restart `index:ocr`. Startup should log `RapidOCR / PaddleOCR (CUDA, …)`.
+**OCR stuck at ~1 image/sec on Windows CUDA**  
+You likely have CPU-only `onnxruntime`, or a too-new `onnxruntime-gpu` (1.29+ wants CUDA 13 while Torch is often CUDA 12). Use `onnxruntime-gpu==1.20.2`, uninstall plain `onnxruntime`, and restart `index:ocr`. Startup should log `RapidOCR … (CUDA, …)`.
+
+**Mac install fails on `onnxruntime-gpu`**  
+Use current `requirements.txt` (platform markers). On Darwin it installs `onnxruntime` only. Do not force `onnxruntime-gpu` on Mac — there is no CUDA.
 
 ---
 
