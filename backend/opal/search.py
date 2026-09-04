@@ -17,6 +17,23 @@ MATCH_THRESHOLDS: dict[MatchLevel, float] = {
     "strict": 0.45,
 }
 
+SIGLIP_MATCH_THRESHOLDS: dict[MatchLevel, float] = {
+    "broad": 0.0,
+    "balanced": 0.04,
+    "strict": 0.12,
+}
+
+WORD_RE = re.compile(r"[\w']+", re.UNICODE)
+
+
+def match_threshold(plan: SearchPlan, embedder) -> float:
+    thresholds = (
+        SIGLIP_MATCH_THRESHOLDS
+        if getattr(embedder, "_siglip", False)
+        else MATCH_THRESHOLDS
+    )
+    return thresholds[plan.match]
+
 TOKEN_RE = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
 
 
@@ -164,6 +181,36 @@ def parse_search(raw: str) -> SearchPlan:
     return plan
 
 
+def enrich_plan_text_search(plan: SearchPlan) -> None:
+    """Also search OCR for plain text the user typed (not only quoted phrases).
+
+    Unquoted `fat` previously went to visual search only; quoted `"fat"` hit OCR.
+    For a screenshot/quote library, plain words should match visible text too.
+    """
+    if plan.has_text is False or not plan.vibe_text:
+        return
+
+    text = plan.vibe_text.strip()
+    if not text:
+        return
+
+    words = [w for w in WORD_RE.findall(text) if len(w) >= 2]
+    if not words:
+        return
+
+    existing_include = {w.lower() for w in plan.include_words}
+    existing_exact = {p.lower() for p in plan.exact_phrases}
+
+    if len(words) == 1:
+        word = words[0]
+        if word.lower() not in existing_include:
+            plan.include_words.append(word)
+    elif text.lower() not in existing_exact:
+        plan.exact_phrases.append(text)
+
+    plan.mode = "hybrid" if plan.vibe_text else plan.mode
+
+
 def merge_plan(
     plan: SearchPlan,
     *,
@@ -225,7 +272,8 @@ def _passes_dates(record, plan: SearchPlan) -> bool:
 
 def execute_search(plan: SearchPlan, manifest, chroma, embedder, limit: int = 48):
     """Return list of (PhotoRecord, match_kind, similarity)."""
-    threshold = MATCH_THRESHOLDS[plan.match]
+    enrich_plan_text_search(plan)
+    threshold = match_threshold(plan, embedder)
     ranked: list[tuple[Any, MatchKind, float | None]] = []
     seen: set[str] = set()
 
@@ -271,7 +319,6 @@ def execute_search(plan: SearchPlan, manifest, chroma, embedder, limit: int = 48
         query_vector = embedder.embed_text(plan.vibe_text)
         raw = chroma.query(
             query_embedding=query_vector,
-            query_text=plan.vibe_text,
             n_results=min(limit * 4, 120),
             where=where,
         )
@@ -281,7 +328,8 @@ def execute_search(plan: SearchPlan, manifest, chroma, embedder, limit: int = 48
                 raw["metadatas"][0],
                 raw.get("distances", [[]])[0],
             ):
-                similarity = round(1.0 - dist, 4)
+                cosine = 1.0 - dist
+                similarity = round(embedder.similarity_score(cosine), 4)
                 record = manifest.get_by_id(cid)
                 if record:
                     add(record, "similar", similarity)
@@ -298,4 +346,9 @@ def execute_search(plan: SearchPlan, manifest, chroma, embedder, limit: int = 48
 
     kind_order = {"exact": 0, "include": 1, "similar": 2}
     ranked.sort(key=lambda item: (kind_order[item[1]], -(item[2] or 0)))
+
+    if not ranked and plan.vibe_text and plan.match != "broad":
+        plan.match = "broad"
+        return execute_search(plan, manifest, chroma, embedder, limit=limit)
+
     return ranked[:limit]

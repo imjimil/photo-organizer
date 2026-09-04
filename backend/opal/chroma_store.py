@@ -85,16 +85,18 @@ class ChromaStore:
     def query(
         self,
         query_embedding: list[float],
-        query_text: str,
         n_results: int = 12,
         where: dict | None = None,
+        *,
+        query_text: str | None = None,
     ) -> dict:
         kwargs: dict[str, Any] = {
             "query_embeddings": [query_embedding],
-            "query_texts": [query_text],
             "n_results": n_results,
             "include": ["metadatas", "documents", "distances"],
         }
+        if query_text:
+            kwargs["query_texts"] = [query_text]
         if where:
             kwargs["where"] = where
         return self.collection.query(**kwargs)

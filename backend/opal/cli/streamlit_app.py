@@ -73,9 +73,9 @@ if query_phrase:
     ) else num_results
     results = chroma.query(
         query_embedding=query_vector,
-        query_text=query_phrase,
         n_results=min(fetch_n, 100),
         where=where_filter,
+        query_text=query_phrase,
     )
 
     if results and results.get("metadatas") and results["metadatas"][0]:

@@ -141,6 +141,23 @@ export default function App() {
     }
   }, [indexStatus.browse_ready, reloadLibrary])
 
+  useEffect(() => {
+    if (!indexStatus.running) return
+    refreshSources()
+    const id = window.setInterval(refreshSources, 3000)
+    return () => window.clearInterval(id)
+  }, [indexStatus.running, indexStatus.phase, indexStatus.current, refreshSources])
+
+  const prevIndexing = useRef(indexStatus.running)
+  useEffect(() => {
+    if (prevIndexing.current && !indexStatus.running) {
+      refreshSources()
+      reloadLibrary()
+      getStats().then((s) => setStatsTotal(s.browse_ready)).catch(() => {})
+    }
+    prevIndexing.current = indexStatus.running
+  }, [indexStatus.running, refreshSources, reloadLibrary])
+
   const {
     items: collectionItems,
     loading: collectionLoading,
@@ -469,7 +486,7 @@ export default function App() {
         {searchStatus}
       </p>
 
-      <div className="app-shell-grid relative z-10 min-h-dvh pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0">
+      <div className="app-shell-grid relative z-10 h-full md:pb-0">
         <Titlebar />
         <EdgeRail
           view={view}
@@ -502,6 +519,7 @@ export default function App() {
         {desktop && (
           <IndexProgressBanner
             status={indexStatus}
+            sources={sources}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
@@ -531,20 +549,20 @@ export default function App() {
                 onClear={clearSelection}
               />
             )}
+            <LibraryToolbar
+              total={statsTotal || libraryTotal}
+              sort={feedSort}
+              onSortChange={setFeedSort}
+              selectionMode={selectionMode}
+              onEnterSelection={enterSelectionMode}
+              sourcesLabel={sourcesLabel}
+              onOpenSources={openSources}
+            />
             <main
               id="main-content"
               className="canvas-main canvas-main-pad"
               onClick={handleGridMainClick}
             >
-              <LibraryToolbar
-                total={statsTotal || libraryTotal}
-                sort={feedSort}
-                onSortChange={setFeedSort}
-                selectionMode={selectionMode}
-                onEnterSelection={enterSelectionMode}
-                sourcesLabel={sourcesLabel}
-                onOpenSources={openSources}
-              />
               {showLibraryEmpty ? (
                 <LibraryEmpty
                   indexed={libraryIndexed}

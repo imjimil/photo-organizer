@@ -2,7 +2,7 @@
 
 import unittest
 
-from opal.search import parse_search
+from opal.search import enrich_plan_text_search, parse_search
 
 
 class ParseSearchTests(unittest.TestCase):
@@ -57,6 +57,30 @@ class ParseSearchTests(unittest.TestCase):
         self.assertEqual(plan.vibe_text, "warmth")
         self.assertEqual(plan.exact_phrases, ["be yourself"])
         self.assertEqual(plan.mode, "hybrid")
+
+    def test_enrich_single_word_adds_ocr(self):
+        plan = parse_search("fat")
+        enrich_plan_text_search(plan)
+        self.assertEqual(plan.include_words, ["fat"])
+        self.assertEqual(plan.mode, "hybrid")
+
+    def test_enrich_quoted_only_skips_vibe(self):
+        plan = parse_search('"fat"')
+        enrich_plan_text_search(plan)
+        self.assertEqual(plan.exact_phrases, ["fat"])
+        self.assertEqual(plan.include_words, [])
+
+    def test_enrich_multi_word_adds_phrase(self):
+        plan = parse_search("motivational quote")
+        enrich_plan_text_search(plan)
+        self.assertEqual(plan.exact_phrases, ["motivational quote"])
+        self.assertEqual(plan.include_words, [])
+
+    def test_enrich_skips_visual_only(self):
+        plan = parse_search("sunset")
+        plan.has_text = False
+        enrich_plan_text_search(plan)
+        self.assertEqual(plan.include_words, [])
 
 
 if __name__ == "__main__":

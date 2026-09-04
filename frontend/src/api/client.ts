@@ -73,6 +73,9 @@ export interface SourceSummary {
   path: string
   count: number
   browse_count: number
+  duplicate_count: number
+  visual_ready: number
+  text_ready: number
   active: boolean
   enabled: boolean
   removed: boolean

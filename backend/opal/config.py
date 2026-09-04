@@ -8,13 +8,23 @@ from opal.device import configure_mps_fallback, default_clip_batch_size, resolve
 
 configure_mps_fallback()
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_data_path(value: str | Path) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return (PROJECT_ROOT / path).resolve()
+
+
 # Paths (override via environment variables)
-IMAGE_FOLDER = Path(
+IMAGE_FOLDER = _resolve_data_path(
     os.getenv("IMAGE_FOLDER", r"C:\Users\praja\Downloads\Demo_data_video")
 )
-CHROMA_PATH = Path(os.getenv("CHROMA_PATH", "./my_quote_library"))
-MANIFEST_PATH = Path(os.getenv("MANIFEST_PATH", "./data/manifest.db"))
-THUMB_CACHE_PATH = Path(os.getenv("THUMB_CACHE_PATH", "./.cache/thumbs"))
+CHROMA_PATH = _resolve_data_path(os.getenv("CHROMA_PATH", "./my_quote_library"))
+MANIFEST_PATH = _resolve_data_path(os.getenv("MANIFEST_PATH", "./data/manifest.db"))
+THUMB_CACHE_PATH = _resolve_data_path(os.getenv("THUMB_CACHE_PATH", "./.cache/thumbs"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "quotes_collection")
 
 # Models

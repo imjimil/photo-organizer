@@ -3,6 +3,7 @@ import type { SourceSummary } from '../api/client'
 import type { IndexStatus } from '../api/client'
 import { IndexProgressPanel } from './IndexProgressBanner'
 import { revealPath } from '../utils/desktop'
+import { formatSourceIndexing, formatSourceSearch, formatSourceStats } from '../utils/sourceStats'
 
 interface SourcesSettingsProps {
   sources: SourceSummary[]
@@ -56,49 +57,64 @@ export function SourcesSettings({
           </button>
         </div>
 
-        <IndexProgressPanel status={indexStatus} />
+        <IndexProgressPanel status={indexStatus} sources={sources} />
 
         <div className="settings-sources-list mt-6">
           {sources.length === 0 && (
             <p className="type-caption text-text-muted">No folders added yet</p>
           )}
-          {sources.map((source) => (
-            <div key={source.id} className="settings-source-row">
-              <div className="min-w-0 flex-1">
-                <p className="type-body truncate text-text-primary">{source.name}</p>
-                <p className="type-caption truncate text-text-faint">{source.path}</p>
-                <p className="type-caption mt-1 text-text-muted">
-                  {source.browse_count.toLocaleString()} browsable ·{' '}
-                  {source.count.toLocaleString()} indexed
-                </p>
+          {sources.map((source) => {
+            const indexing = formatSourceIndexing(source)
+            const searchStats = formatSourceSearch(source)
+            return (
+              <div
+                key={source.id}
+                className={`settings-source-row${indexing ? ' settings-source-row-active' : ''}`}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="type-body truncate text-text-primary">{source.name}</p>
+                  <p className="type-caption truncate text-text-faint">{source.path}</p>
+                  {indexing ? (
+                    <p className="type-caption mt-1 text-accent">{indexing}…</p>
+                  ) : (
+                    <>
+                      <p className="type-caption mt-1 text-text-muted">
+                        {formatSourceStats(source)}
+                      </p>
+                      {searchStats && (
+                        <p className="type-caption text-text-faint">{searchStats}</p>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="settings-source-actions">
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={busy === source.id || indexStatus.running}
+                    onClick={() => onRescan(source.id)}
+                  >
+                    Re-scan
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => revealPath(source.path)}
+                  >
+                    Reveal
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-text-muted"
+                    disabled={busy === source.id}
+                    onClick={() => handleRemove(source)}
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
-              <div className="settings-source-actions">
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={busy === source.id || indexStatus.running}
-                  onClick={() => onRescan(source.id)}
-                >
-                  Re-scan
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() => revealPath(source.path)}
-                >
-                  Reveal
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost text-text-muted"
-                  disabled={busy === source.id}
-                  onClick={() => handleRemove(source)}
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <button

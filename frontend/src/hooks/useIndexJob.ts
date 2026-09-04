@@ -65,6 +65,6 @@ export function useIndexJob(pollMs = 1500) {
     status,
     refresh,
     indexing: status.running,
-    searchPartial: status.search_ready_percent < 100,
+    searchPartial: status.running,
   }
 }

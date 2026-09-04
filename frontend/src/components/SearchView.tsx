@@ -149,14 +149,14 @@ export function SearchView({
 
         {searchPartial && (
           <p className="search-partial-note type-caption">
-            Indexing in progress. Search only covers photos processed so far.
+            Indexing in progress — search covers photos processed so far.
           </p>
         )}
 
         {tipsOpen && (
           <div className="search-tips panel-slide">
             <p>
-              <strong>"phrase"</strong> or <strong>exact:words</strong> for quotes
+              Type words to search <strong>text in photos</strong> and mood. Use <strong>"quotes"</strong> for an exact phrase.
             </p>
             <p>
               <strong>-word</strong> exclude · <strong>in:folder</strong> scope · <strong>during:2024</strong> dates

@@ -91,6 +91,9 @@ class SourceSummary(BaseModel):
     path: str
     count: int
     browse_count: int = 0
+    duplicate_count: int = 0
+    visual_ready: int = 0
+    text_ready: int = 0
     active: bool = True
     enabled: bool = True
     removed: bool = False

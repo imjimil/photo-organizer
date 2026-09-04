@@ -80,7 +80,8 @@ class PhotoRecord:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS photos (
     id TEXT PRIMARY KEY,
-    rel_path TEXT UNIQUE NOT NULL,
+    source_id TEXT NOT NULL DEFAULT '00000000-0000-4000-8000-000000000001',
+    rel_path TEXT NOT NULL,
     file_size INTEGER NOT NULL,
     mtime REAL NOT NULL,
     content_hash TEXT NOT NULL,
@@ -93,8 +94,10 @@ CREATE TABLE IF NOT EXISTS photos (
     duplicate_of TEXT,
     exif_date TEXT,
     width INTEGER,
-    height INTEGER
+    height INTEGER,
+    ocr_engine TEXT DEFAULT ''
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_source_rel ON photos(source_id, rel_path);
 CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status);
 CREATE INDEX IF NOT EXISTS idx_photos_rel_path ON photos(rel_path);
 CREATE INDEX IF NOT EXISTS idx_photos_content_hash ON photos(content_hash);
@@ -130,11 +133,109 @@ class Manifest:
             self._migrate_sources(conn)
             self._migrate_dimensions(conn)
             self._migrate_ocr_engine(conn)
+            self._migrate_drop_global_rel_path_unique(conn)
 
     def _migrate_ocr_engine(self, conn: sqlite3.Connection) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(photos)")}
         if "ocr_engine" not in cols:
             conn.execute("ALTER TABLE photos ADD COLUMN ocr_engine TEXT DEFAULT ''")
+
+    def _migrate_drop_global_rel_path_unique(self, conn: sqlite3.Connection) -> None:
+        """Allow the same relative filename across different sources.
+
+        Older DBs had UNIQUE(rel_path). Multi-source needs UNIQUE(source_id, rel_path).
+        """
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='photos'"
+        ).fetchone()
+        if not row or not row[0]:
+            return
+        sql = " ".join(row[0].split())
+        if "rel_path TEXT UNIQUE" not in sql:
+            return
+
+        logger.info(
+            "Migrating photos table: dropping global UNIQUE(rel_path) for multi-source"
+        )
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(photos)")}
+        # Build SELECT list with defaults for any missing columns
+        select_bits = [
+            "id",
+            "COALESCE(source_id, ?) AS source_id" if "source_id" in cols else "? AS source_id",
+            "rel_path",
+            "file_size",
+            "mtime",
+            "content_hash",
+            "COALESCE(ocr_text, '')",
+            "COALESCE(has_text, 0)",
+            "COALESCE(clip_model, '')",
+            "indexed_at",
+            "COALESCE(status, 'pending')",
+            "error_msg",
+            "duplicate_of",
+            "exif_date",
+            "width" if "width" in cols else "NULL AS width",
+            "height" if "height" in cols else "NULL AS height",
+            "COALESCE(ocr_engine, '')" if "ocr_engine" in cols else "'' AS ocr_engine",
+        ]
+        params: list = []
+        if "source_id" in cols:
+            params.append(DEFAULT_SOURCE_ID)
+        else:
+            params.append(DEFAULT_SOURCE_ID)
+
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute(
+            """
+            CREATE TABLE photos_new (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                rel_path TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                mtime REAL NOT NULL,
+                content_hash TEXT NOT NULL,
+                ocr_text TEXT DEFAULT '',
+                has_text INTEGER DEFAULT 0,
+                clip_model TEXT DEFAULT '',
+                indexed_at TEXT,
+                status TEXT DEFAULT 'pending',
+                error_msg TEXT,
+                duplicate_of TEXT,
+                exif_date TEXT,
+                width INTEGER,
+                height INTEGER,
+                ocr_engine TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            f"""
+            INSERT INTO photos_new (
+                id, source_id, rel_path, file_size, mtime, content_hash,
+                ocr_text, has_text, clip_model, indexed_at, status,
+                error_msg, duplicate_of, exif_date, width, height, ocr_engine
+            )
+            SELECT {", ".join(select_bits)} FROM photos
+            """,
+            params,
+        )
+        conn.execute("DROP TABLE photos")
+        conn.execute("ALTER TABLE photos_new RENAME TO photos")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_photos_source_rel "
+            "ON photos(source_id, rel_path)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_photos_rel_path ON photos(rel_path)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_photos_content_hash ON photos(content_hash)"
+        )
+        conn.execute("PRAGMA foreign_keys=ON")
+        logger.info("photos UNIQUE(rel_path) migration complete")
 
     def _migrate_dimensions(self, conn: sqlite3.Connection) -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(photos)")}
@@ -268,6 +369,42 @@ class Manifest:
                 f"SELECT COUNT(*) AS cnt FROM photos WHERE {where}", params
             ).fetchone()
         return row["cnt"] if row else 0
+
+    def source_duplicate_count(self, source_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM photos
+                WHERE source_id = ? AND duplicate_of IS NOT NULL
+                """,
+                (source_id,),
+            ).fetchone()
+        return row["cnt"] if row else 0
+
+    def source_search_counts(self, source_id: str) -> tuple[int, int]:
+        """Return (visual_ready, text_ready) for unique photos in a source."""
+        with self._connect() as conn:
+            visual_row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM photos
+                WHERE source_id = ?
+                  AND duplicate_of IS NULL
+                  AND status IN (?, ?, ?)
+                """,
+                (source_id, STATUS_CLIP_DONE, STATUS_OCR_DONE, STATUS_INDEXED),
+            ).fetchone()
+            text_row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM photos
+                WHERE source_id = ?
+                  AND duplicate_of IS NULL
+                  AND status IN (?, ?)
+                """,
+                (source_id, STATUS_OCR_DONE, STATUS_INDEXED),
+            ).fetchone()
+        visual = visual_row["cnt"] if visual_row else 0
+        text = text_row["cnt"] if text_row else 0
+        return visual, text
 
     def add_or_restore_source(self, path: str, name: str | None = None) -> SourceRecord:
         normalized = normalize_source_path(path)

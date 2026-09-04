@@ -95,6 +95,7 @@
   html {
     font-family: var(--font-ui);
     font-size: 16px;
+    height: 100%;
     background: var(--s-bg-base);
     color: var(--s-text-primary);
     -webkit-font-smoothing: antialiased;
@@ -153,7 +154,9 @@
 
   body {
     margin: 0;
+    height: 100%;
     min-height: 100dvh;
+    overflow: hidden;
     font-family: var(--font-ui);
     font-size: 0.875rem;
     line-height: 1.45;
@@ -165,7 +168,9 @@
 @layer utilities {
   .app-shell {
     position: relative;
-    min-height: 100dvh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
     isolation: isolate;
   }
 
@@ -279,9 +284,9 @@
   }
 
   .top-rail {
-    position: sticky;
-    top: 0;
+    position: relative;
     z-index: 40;
+    flex-shrink: 0;
     border-bottom: 1px solid var(--color-border);
     background: var(--s-bg-surface);
   }
@@ -2273,6 +2278,7 @@
   }
 
   .context-hint {
+    flex-shrink: 0;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -2365,9 +2371,9 @@
   }
 
   .search-shell {
-    position: sticky;
-    top: 0;
+    position: relative;
     z-index: 20;
+    flex-shrink: 0;
     padding: 0.75rem 0.75rem 0.5rem;
     background: var(--color-bg-canvas);
     border-bottom: 1px solid var(--color-border);
@@ -2892,14 +2898,19 @@
 
   .canvas-main {
     width: 100%;
-    flex: 1;
+    flex: 1 1 0%;
     min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .canvas-main-pad {
     padding-left: 0.75rem;
     padding-right: 0.75rem;
-    padding-bottom: 2rem;
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
   }
 
   @media (min-width: 768px) {
@@ -3058,7 +3069,9 @@
 
   .onboarding-shell {
     display: grid;
-    min-height: 100dvh;
+    height: 100dvh;
+    min-height: 0;
+    overflow-y: auto;
     grid-template-columns: 1fr;
     background: var(--color-bg-surface);
   }
@@ -3175,13 +3188,27 @@
     gap: 0.75rem;
   }
 
+  .index-panel-error {
+    border-color: color-mix(in oklch, var(--color-accent) 35%, var(--color-border));
+    background: color-mix(in oklch, var(--color-accent) 8%, var(--color-bg-base));
+  }
+
+  .settings-source-row-active {
+    background: color-mix(in oklch, var(--color-accent) 6%, transparent);
+    margin-inline: -0.5rem;
+    padding-inline: 0.5rem;
+    border-radius: 0.5rem;
+  }
+
   /* ── v7 Darkroom shell ── */
 
   .app-shell-grid {
     display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
-    min-height: 100dvh;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   @media (min-width: 768px) {
@@ -3257,6 +3284,8 @@
     padding: 0.75rem 0.625rem 0.875rem;
     background: var(--color-bg-surface);
     border-right: 1px solid var(--color-border);
+    min-height: 0;
+    overflow: hidden;
   }
 
   .edge-rail-brand {
@@ -3335,8 +3364,11 @@
   }
 
   .app-canvas {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
-    overflow: auto;
+    min-height: 0;
+    overflow: hidden;
   }
 
   @media (min-width: 768px) {
@@ -3351,12 +3383,27 @@
     }
   }
 
+  .app-canvas > .view-enter {
+    flex: 1 1 0%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .app-canvas > .index-banner {
+    flex-shrink: 0;
+  }
+
+  .collection-detail-header {
+    flex-shrink: 0;
+  }
+
   .library-toolbar {
     align-items: center;
     gap: 0.75rem 1rem;
-    padding: 0.625rem 0 0.75rem;
+    padding: 0.625rem 1.25rem 0.75rem;
     border-bottom: 1px solid var(--color-border);
-    margin-bottom: 0.75rem;
+    flex-shrink: 0;
+    background: var(--color-bg-canvas);
   }
 
   .library-toolbar-intro {

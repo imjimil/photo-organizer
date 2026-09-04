@@ -1,6 +1,7 @@
 """Batched SigLIP / CLIP image and text embedding."""
 
 import logging
+import math
 from pathlib import Path
 
 import torch
@@ -11,8 +12,6 @@ from opal.config import CLIP_BATCH_SIZE, CLIP_MODEL, DEVICE
 from opal.device import device_label, resolve_torch_device
 
 logger = logging.getLogger("photo_organizer.embedder")
-
-SIGLIP_TEXT_MAX_LENGTH = 64
 
 
 class CLIPEmbedder:
@@ -77,19 +76,23 @@ class CLIPEmbedder:
 
     def embed_text(self, text: str) -> list[float]:
         """Embed a single text query."""
-        if self._siglip:
-            inputs = self.processor(
-                text=[text],
-                return_tensors="pt",
-                padding="max_length",
-                max_length=SIGLIP_TEXT_MAX_LENGTH,
-                truncation=True,
-            ).to(self.device)
-        else:
-            inputs = self.processor(
-                text=[text], return_tensors="pt", padding=True, truncation=True
-            ).to(self.device)
+        inputs = self.processor(
+            text=[text],
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        ).to(self.device)
         with torch.no_grad():
             features = self.model.get_text_features(**inputs)
             features = self._normalize(features)
         return features.flatten().cpu().tolist()
+
+    def similarity_score(self, cosine: float) -> float:
+        """Map cosine similarity to a comparable ranking score for the active model."""
+        if not self._siglip:
+            return cosine
+        logit = (
+            cosine * self.model.logit_scale.exp().item()
+            + float(self.model.logit_bias.item())
+        )
+        return 1.0 / (1.0 + math.exp(-logit))

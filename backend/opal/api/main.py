@@ -40,7 +40,7 @@ from opal.config import CLIP_BATCH_SIZE, IMAGE_FOLDER, setup_logging
 from opal.device import device_label, resolve_torch_device
 from opal.folder_watcher import get_folder_watcher
 from opal.index_service import get_index_service
-from opal.manifest import path_id
+from opal.manifest import SourceRecord, path_id
 from opal.search import MatchLevel, execute_search, merge_plan, parse_search
 from opal.thumbnails import get_display_image
 
@@ -54,6 +54,30 @@ logger.info(
     device_label(_torch_device),
     CLIP_BATCH_SIZE,
 )
+
+
+def _source_summary(
+    manifest,
+    source: SourceRecord,
+    *,
+    indexing_phase: str | None = None,
+) -> SourceSummary:
+    visual, text = manifest.source_search_counts(source.id)
+    return SourceSummary(
+        id=source.id,
+        name=source.name,
+        path=source.path,
+        count=manifest.source_photo_count(source.id),
+        browse_count=manifest.source_photo_count(source.id, browse_ready_only=True),
+        duplicate_count=manifest.source_duplicate_count(source.id),
+        visual_ready=visual,
+        text_ready=text,
+        active=source.enabled and source.removed_at is None,
+        enabled=source.enabled,
+        removed=source.removed_at is not None,
+        last_scan_at=source.last_scan_at,
+        indexing_phase=indexing_phase,
+    )
 
 
 @asynccontextmanager
@@ -139,20 +163,7 @@ def sources(include_removed: bool = Query(False)):
     items: list[SourceSummary] = []
     for source in rows:
         phase = job["phase"] if job.get("source_id") == source.id and job.get("running") else None
-        items.append(
-            SourceSummary(
-                id=source.id,
-                name=source.name,
-                path=source.path,
-                count=manifest.source_photo_count(source.id),
-                browse_count=manifest.source_photo_count(source.id, browse_ready_only=True),
-                active=source.enabled and source.removed_at is None,
-                enabled=source.enabled,
-                removed=source.removed_at is not None,
-                last_scan_at=source.last_scan_at,
-                indexing_phase=phase,
-            )
-        )
+        items.append(_source_summary(manifest, source, indexing_phase=phase))
     return SourcesResponse(sources=items)
 
 
@@ -165,17 +176,9 @@ def create_source(body: SourceCreateRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     get_index_service().request(get_manifest(), get_chroma(), source.id)
     get_folder_watcher().refresh()
-    return SourceSummary(
-        id=source.id,
-        name=source.name,
-        path=source.path,
-        count=0,
-        browse_count=0,
-        active=True,
-        enabled=True,
-        removed=False,
-        last_scan_at=source.last_scan_at,
-    )
+    job = get_index_service().status(manifest)
+    phase = job["phase"] if job.get("source_id") == source.id and job.get("running") else None
+    return _source_summary(manifest, source, indexing_phase=phase)
 
 
 @app.patch("/api/sources/{source_id}", response_model=SourceSummary)
@@ -187,17 +190,9 @@ def update_source(source_id: str, body: SourceUpdateRequest):
     if not updated:
         raise HTTPException(status_code=404, detail="Source not found")
     get_folder_watcher().refresh()
-    return SourceSummary(
-        id=updated.id,
-        name=updated.name,
-        path=updated.path,
-        count=manifest.source_photo_count(updated.id),
-        browse_count=manifest.source_photo_count(updated.id, browse_ready_only=True),
-        active=updated.enabled and updated.removed_at is None,
-        enabled=updated.enabled,
-        removed=updated.removed_at is not None,
-        last_scan_at=updated.last_scan_at,
-    )
+    job = get_index_service().status(manifest)
+    phase = job["phase"] if job.get("source_id") == updated.id and job.get("running") else None
+    return _source_summary(manifest, updated, indexing_phase=phase)
 
 
 @app.delete("/api/sources/{source_id}")
@@ -512,6 +507,7 @@ def similar(image_id: str, limit: int = Query(12, ge=1, le=40)):
 
     chroma = get_chroma()
     manifest = get_manifest()
+    embedder = get_embedder()
     got = chroma.collection.get(ids=[record.content_hash], include=["embeddings"])
     if not got.get("embeddings") or not got["embeddings"][0]:
         raise HTTPException(status_code=404, detail="Embedding not found")
@@ -534,8 +530,10 @@ def similar(image_id: str, limit: int = Query(12, ge=1, le=40)):
         if not rec or not manifest.record_in_active_library(rec):
             continue
         summary = record_to_summary(rec)
+        cosine = 1.0 - dist
+        similarity = round(embedder.similarity_score(cosine), 4)
         results.append(
-            SearchResult(**summary, similarity=round(1.0 - dist, 4))
+            SearchResult(**summary, similarity=similarity)
         )
         if len(results) >= limit:
             break

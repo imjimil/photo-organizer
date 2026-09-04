@@ -1,29 +1,36 @@
-import type { IndexStatus } from '../api/client'
+import type { IndexStatus, SourceSummary } from '../api/client'
 import { formatEta, phaseLabel } from '../hooks/useIndexJob'
 
 interface IndexProgressBannerProps {
   status: IndexStatus
+  sources?: SourceSummary[]
   onOpenSettings?: () => void
 }
 
-export function IndexProgressBanner({ status, onOpenSettings }: IndexProgressBannerProps) {
-  if (!status.running && status.search_ready_percent >= 100) return null
+function activeSourceName(status: IndexStatus, sources?: SourceSummary[]): string | null {
+  if (!status.source_id || !sources) return null
+  return sources.find((s) => s.id === status.source_id)?.name ?? null
+}
 
-  const label = status.running
-    ? `${phaseLabel(status.phase)} · ${status.current.toLocaleString()} / ${status.total.toLocaleString()}`
-    : `Search ready for ${status.search_ready_percent}% of library`
+export function IndexProgressBanner({ status, sources, onOpenSettings }: IndexProgressBannerProps) {
+  if (!status.running) return null
 
-  const eta = status.running ? formatEta(status.eta_seconds) : null
+  const sourceName = activeSourceName(status, sources)
+  const phase = phaseLabel(status.phase)
+  const label = sourceName
+    ? `${sourceName} · ${phase}`
+    : phase
+  const progress =
+    status.total > 0
+      ? `${status.current.toLocaleString()} / ${status.total.toLocaleString()}`
+      : status.message
 
   return (
     <div className="index-banner" role="status">
       <div className="index-banner-body">
         <p className="index-banner-title">{label}</p>
-        {eta && <p className="index-banner-meta">{eta}</p>}
-        {!status.running && status.search_ready_percent < 100 && (
-          <p className="index-banner-meta">Mood and text search cover indexed photos only</p>
-        )}
-        {status.running && status.total > 0 && (
+        <p className="index-banner-meta">{progress}</p>
+        {status.total > 0 && (
           <div className="index-banner-track" aria-hidden>
             <div
               className="index-banner-fill"
@@ -31,10 +38,13 @@ export function IndexProgressBanner({ status, onOpenSettings }: IndexProgressBan
             />
           </div>
         )}
+        {status.eta_seconds !== null && status.eta_seconds > 0 && (
+          <p className="index-banner-meta">{formatEta(status.eta_seconds)}</p>
+        )}
       </div>
       {onOpenSettings && (
         <button type="button" className="index-banner-link" onClick={onOpenSettings}>
-          Sources
+          Details
         </button>
       )}
     </div>
@@ -43,24 +53,35 @@ export function IndexProgressBanner({ status, onOpenSettings }: IndexProgressBan
 
 interface IndexProgressPanelProps {
   status: IndexStatus
+  sources?: SourceSummary[]
 }
 
-export function IndexProgressPanel({ status }: IndexProgressPanelProps) {
-  if (!status.running && status.phase === 'idle') {
+export function IndexProgressPanel({ status, sources }: IndexProgressPanelProps) {
+  if (status.error) {
     return (
-      <p className="type-caption text-text-muted">No indexing in progress</p>
+      <div className="index-panel index-panel-error" role="alert">
+        <p className="type-body text-text-primary">Indexing failed</p>
+        <p className="type-caption mt-1 text-text-muted">{status.error}</p>
+        <p className="type-caption mt-2 text-text-faint">
+          Try Re-scan on the folder in Sources.
+        </p>
+      </div>
     )
   }
+
+  if (!status.running) return null
+
+  const sourceName = activeSourceName(status, sources)
 
   return (
     <div className="index-panel">
       <div className="index-panel-row">
-        <span className="type-eyebrow text-text-faint">{phaseLabel(status.phase)}</span>
-        {status.running && (
-          <span className="type-caption text-text-muted">{formatEta(status.eta_seconds)}</span>
-        )}
+        <span className="type-eyebrow text-text-faint">
+          {sourceName ? `${sourceName} · ${phaseLabel(status.phase)}` : phaseLabel(status.phase)}
+        </span>
+        <span className="type-caption text-text-muted">{formatEta(status.eta_seconds)}</span>
       </div>
-      {status.total > 0 && (
+      {status.total > 0 ? (
         <>
           <div className="index-banner-track" aria-hidden>
             <div
@@ -69,12 +90,17 @@ export function IndexProgressPanel({ status }: IndexProgressPanelProps) {
             />
           </div>
           <p className="type-caption mt-2 text-text-muted">
-            {status.current.toLocaleString()} / {status.total.toLocaleString()} photos
+            {status.current.toLocaleString()} / {status.total.toLocaleString()}
+            {status.phase === 'thumbnails' && ' thumbnails'}
+            {status.phase === 'clip' && ' photos (visual search)'}
+            {status.phase === 'ocr' && ' photos (text search)'}
           </p>
         </>
+      ) : (
+        <p className="type-caption mt-2 text-text-muted">{status.message || 'Starting…'}</p>
       )}
       <p className="type-caption mt-2 text-text-faint">
-        Search ready: {status.search_ready_percent}%
+        Thumbnails appear first. Search improves as indexing finishes.
       </p>
     </div>
   )
