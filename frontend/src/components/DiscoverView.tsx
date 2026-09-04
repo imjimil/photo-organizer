@@ -26,6 +26,7 @@ export function DiscoverView({ onOpen }: DiscoverViewProps) {
   const seenRef = useRef<Set<string>>(new Set())
   const deckRef = useRef<HTMLDivElement>(null)
   const deckWidthRef = useRef(320)
+  const [deckWidth, setDeckWidth] = useState(320)
   const pointerRef = useRef<{ x: number; y: number; active: boolean; id: number } | null>(null)
   const dragXRef = useRef(0)
   const committingRef = useRef(false)
@@ -47,11 +48,14 @@ export function DiscoverView({ onOpen }: DiscoverViewProps) {
   useEffect(() => {
     const el = deckRef.current
     if (!el) return
-    const syncWidth = () => {
-      deckWidthRef.current = el.offsetWidth || 320
+    const syncWidth = (width: number) => {
+      const next = width || 320
+      deckWidthRef.current = next
+      setDeckWidth((prev) => (prev === next ? prev : next))
     }
-    syncWidth()
-    const ro = new ResizeObserver(syncWidth)
+    const ro = new ResizeObserver((entries) => {
+      syncWidth(entries[0]?.contentRect.width ?? el.offsetWidth)
+    })
     ro.observe(el)
     return () => ro.disconnect()
   }, [loading, current?.id])
@@ -109,9 +113,11 @@ export function DiscoverView({ onOpen }: DiscoverViewProps) {
 
   useEffect(() => {
     if (loading || deck.length === 0) return
-    if (deck.length - index <= PREFETCH_THRESHOLD) {
-      fetchMore().catch(() => {})
-    }
+    if (deck.length - index > PREFETCH_THRESHOLD) return
+    const kickoff = window.setTimeout(() => {
+      void fetchMore().catch(() => {})
+    }, 0)
+    return () => window.clearTimeout(kickoff)
   }, [deck.length, index, loading, fetchMore])
 
   const resetDrag = useCallback((instant = false) => {
@@ -279,7 +285,7 @@ export function DiscoverView({ onOpen }: DiscoverViewProps) {
     }
   }, [loading, current?.id])
 
-  const width = deckWidthRef.current
+  const width = deckWidth
   const nextProgress =
     dragX < 0 ? Math.min(1, Math.abs(dragX) / Math.max(width, 1)) : 0
   const prevProgress =

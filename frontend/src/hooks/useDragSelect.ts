@@ -152,6 +152,8 @@ export function useDragSelect({
     releaseCapture()
   }, [clearLongPress, releaseCapture])
 
+  const detachWindowListenersRef = useRef<() => void>(() => {})
+
   const onWindowMove = useCallback(
     (e: PointerEvent) => {
       if (!sessionActive.current || !startPoint.current || !startId.current) return
@@ -198,19 +200,23 @@ export function useDragSelect({
 
   const onWindowUp = useCallback(() => {
     endSession()
-    window.removeEventListener('pointermove', onWindowMove)
-    window.removeEventListener('pointerup', onWindowUp)
-    window.removeEventListener('pointercancel', onWindowUp)
-  }, [endSession, onWindowMove])
+    detachWindowListenersRef.current()
+  }, [endSession])
 
   useEffect(() => {
-    return () => {
-      clearLongPress()
+    detachWindowListenersRef.current = () => {
       window.removeEventListener('pointermove', onWindowMove)
       window.removeEventListener('pointerup', onWindowUp)
       window.removeEventListener('pointercancel', onWindowUp)
     }
-  }, [clearLongPress, onWindowMove, onWindowUp])
+  }, [onWindowMove, onWindowUp])
+
+  useEffect(() => {
+    return () => {
+      clearLongPress()
+      detachWindowListenersRef.current()
+    }
+  }, [clearLongPress])
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {

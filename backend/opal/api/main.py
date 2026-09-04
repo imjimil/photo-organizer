@@ -77,6 +77,7 @@ def _source_summary(
         removed=source.removed_at is not None,
         last_scan_at=source.last_scan_at,
         indexing_phase=indexing_phase,
+        cover_photo_id=manifest.get_source_cover_photo(source.id),
     )
 
 
@@ -149,7 +150,12 @@ def collections(limit: int = Query(24, ge=1, le=100)):
         if not folder:
             continue
         items.append(
-            CollectionSummary(id=folder, name=folder, count=count)
+            CollectionSummary(
+                id=folder,
+                name=folder,
+                count=count,
+                cover_photo_id=manifest.get_folder_cover_photo(folder),
+            )
         )
     return CollectionsResponse(collections=items)
 

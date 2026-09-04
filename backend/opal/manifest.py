@@ -755,6 +755,38 @@ class Manifest:
             ).fetchone()
         return row["cnt"] if row else 0
 
+    def get_source_cover_photo(self, source_id: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM photos
+                WHERE source_id = ?
+                  AND duplicate_of IS NULL
+                  AND status IN ('indexed', 'ocr_done', 'clip_done', 'pending')
+                ORDER BY mtime DESC
+                LIMIT 1
+                """,
+                (source_id,),
+            ).fetchone()
+        return row["id"] if row else None
+
+    def get_folder_cover_photo(self, folder: str) -> str | None:
+        src_clause, src_params = self._enabled_source_clause()
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT id FROM photos
+                WHERE duplicate_of IS NULL
+                  AND status IN ('indexed', 'ocr_done', 'clip_done', 'pending')
+                  AND {src_clause}
+                  AND (rel_path LIKE ? OR rel_path = ?)
+                ORDER BY mtime DESC
+                LIMIT 1
+                """,
+                (*src_params, f"{folder}/%", folder),
+            ).fetchone()
+        return row["id"] if row else None
+
     def list_collections(self, limit: int = 24) -> list[tuple[str, int]]:
         """Top-level folder names with image counts."""
         src_clause, src_params = self._enabled_source_clause()

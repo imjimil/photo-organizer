@@ -17,6 +17,10 @@ const defaultStatus: IndexStatus = {
   browse_ready: 0,
 }
 
+/** Fast updates while a job runs; slow heartbeat when idle (folder watcher, etc.). */
+const ACTIVE_POLL_MS = 2000
+const IDLE_POLL_MS = 30000
+
 export function formatEta(seconds: number | null): string {
   if (seconds === null || seconds <= 0) return 'Calculating…'
   if (seconds < 60) return `${seconds}s left`
@@ -43,7 +47,7 @@ export function phaseLabel(phase: string): string {
   }
 }
 
-export function useIndexJob(pollMs = 1500) {
+export function useIndexJob() {
   const [status, setStatus] = useState<IndexStatus>(defaultStatus)
 
   const refresh = useCallback(async () => {
@@ -56,10 +60,26 @@ export function useIndexJob(pollMs = 1500) {
   }, [])
 
   useEffect(() => {
-    refresh()
+    // Defer the first fetch so setState isn't synchronous inside the effect body.
+    const kickoff = window.setTimeout(() => {
+      void refresh()
+    }, 0)
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearTimeout(kickoff)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [refresh])
+
+  useEffect(() => {
+    const pollMs = status.running || status.error ? ACTIVE_POLL_MS : IDLE_POLL_MS
     const id = window.setInterval(refresh, pollMs)
     return () => window.clearInterval(id)
-  }, [pollMs, refresh])
+  }, [status.running, status.error, refresh])
 
   return {
     status,

@@ -81,6 +81,7 @@ export interface SourceSummary {
   removed: boolean
   last_scan_at: string | null
   indexing_phase: string | null
+  cover_photo_id: string | null
 }
 
 export interface IndexStatus {
@@ -107,6 +108,7 @@ export interface CollectionSummary {
   id: string
   name: string
   count: number
+  cover_photo_id: string | null
 }
 
 export interface CollectionsResponse {

@@ -24,7 +24,11 @@ export function useSources() {
   }, [])
 
   useEffect(() => {
-    refresh()
+    // Defer so setState from refresh isn't synchronous inside the effect body.
+    const kickoff = window.setTimeout(() => {
+      void refresh()
+    }, 0)
+    return () => window.clearTimeout(kickoff)
   }, [refresh])
 
   const pickAndAdd = useCallback(async () => {

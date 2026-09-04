@@ -99,6 +99,7 @@ class SourceSummary(BaseModel):
     removed: bool = False
     last_scan_at: str | None = None
     indexing_phase: str | None = None
+    cover_photo_id: str | None = None
 
 
 class SourceCreateRequest(BaseModel):
@@ -135,6 +136,7 @@ class CollectionSummary(BaseModel):
     id: str
     name: str
     count: int
+    cover_photo_id: str | None = None
 
 
 class CollectionsResponse(BaseModel):

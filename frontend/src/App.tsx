@@ -104,7 +104,7 @@ export default function App() {
   } = useSources()
   const sourcesLabel = formatSourcesLabel(activeSources)
   const openSources = useCallback(() => setSettingsOpen(true), [])
-  const { status: indexStatus, searchPartial } = useIndexJob()
+  const { status: indexStatus, refresh: refreshIndexStatus, searchPartial } = useIndexJob()
 
   const showOnboarding =
     desktop &&
@@ -448,6 +448,7 @@ export default function App() {
         toast(`Added ${source.name}`, 'success')
         reloadLibrary()
         refreshSources()
+        void refreshIndexStatus()
         return true
       }
       return false
@@ -778,7 +779,10 @@ export default function App() {
             await handleAddFolder()
           }}
           onRemove={removeSource}
-          onRescan={rescan}
+          onRescan={async (id) => {
+            await rescan(id)
+            void refreshIndexStatus()
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       )}
